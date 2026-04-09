@@ -19,3 +19,5 @@ config.json
 dist/*
 task/*
 worker/
+.env
+.cursor

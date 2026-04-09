@@ -1,5 +1,0 @@
----
-globs: *.js,*.vue
-alwaysApply: false
----
-Never silently catch errors; handle by type: for user-impacting or recoverable cases, show clear Ant Design Vue v4 feedback with a safe fallback/retry, otherwise log structured context to the console and rethrow/propagate as appropriate.

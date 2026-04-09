@@ -4,7 +4,7 @@ from typing import Dict, Optional
 
 from anyio import create_task_group, get_cancelled_exc_class, sleep
 from anyio.abc import TaskGroup
-from tenacity import retry, stop_after_attempt, stop_never, wait_fixed
+from tenacity import retry, stop_after_attempt, stop_never, wait_exponential, wait_fixed
 
 from crynux_server.contracts import Contracts
 from crynux_server.models import InferenceTaskStatus, DownloadTaskStatus, TaskType, DownloadTaskState
@@ -14,6 +14,10 @@ from .state_cache import InferenceTaskStateCache, DownloadTaskStateCache
 from .task_runner import InferenceTaskRunner, DownloadTaskRunner
 
 _logger = logging.getLogger(__name__)
+
+DOWNLOAD_TASK_MAX_ATTEMPTS = 3
+DOWNLOAD_TASK_BACKOFF_MULTIPLIER_SECONDS = 30
+DOWNLOAD_TASK_BACKOFF_MAX_SECONDS = 300
 
 
 
@@ -75,8 +79,16 @@ class TaskSystem(object):
             runner = self._download_runners[task_id]
 
             @retry(
-                stop=stop_never if self._retry else stop_after_attempt(1),
-                wait=wait_fixed(30),
+                stop=(
+                    stop_after_attempt(DOWNLOAD_TASK_MAX_ATTEMPTS)
+                    if self._retry
+                    else stop_after_attempt(1)
+                ),
+                wait=wait_exponential(
+                    multiplier=DOWNLOAD_TASK_BACKOFF_MULTIPLIER_SECONDS,
+                    min=DOWNLOAD_TASK_BACKOFF_MULTIPLIER_SECONDS,
+                    max=DOWNLOAD_TASK_BACKOFF_MAX_SECONDS,
+                ),
                 reraise=True,
             )
             async def _run_task_with_retry():
@@ -89,7 +101,15 @@ class TaskSystem(object):
                     _logger.error(f"Download task {task_id} error: {str(e)}")
                     raise
 
-            await _run_task_with_retry()
+            try:
+                await _run_task_with_retry()
+            except get_cancelled_exc_class():
+                raise
+            except Exception as e:
+                await runner.mark_failed()
+                _logger.error(
+                    f"Download task {task_id} is marked as Failed after retry exhaustion: {str(e)}"
+                )
 
         finally:
             # When task is finished, remove it from the task list
@@ -162,6 +182,11 @@ class TaskSystem(object):
     # Create download task with the given task_id
     async def create_download_task(self, task_id: str, task_type: TaskType, model_id: str):
         if task_id not in self._download_runners:
+            if await self._download_state_cache.has(task_id):
+                old_state = await self._download_state_cache.load(task_id)
+                if old_state.status == DownloadTaskStatus.Failed:
+                    old_state.status = DownloadTaskStatus.Started
+                    await self._download_state_cache.dump(old_state)
             state = DownloadTaskState(
                 task_id=task_id,
                 task_type=task_type,

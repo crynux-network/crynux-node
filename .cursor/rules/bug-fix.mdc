@@ -1,5 +1,0 @@
----
-globs: *.js,*.vue, *.py
-alwaysApply: false
----
-Bugfix protocol: First analyze the code to locate the root cause. Form a clear hypothesis and reproduce/validate it. Only after confirming the cause, implement a targeted fix. Do not apply speculative or blanket defensive changes—keep the fix precise, minimal, and directly tied to the confirmed issue.

@@ -45,6 +45,7 @@ class DownloadTaskStatus(IntEnum):
     Started = 0
     Executed = 1
     Success = 2
+    Failed = 3
 
 
 class ChainTask(BaseModel):

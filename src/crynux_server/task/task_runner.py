@@ -563,3 +563,7 @@ class DownloadTaskRunner(object):
             await self.download_model_cache.save(
                 models.DownloadedModel(task_type=self._state.task_type, model=model)
             )
+
+    async def mark_failed(self):
+        async with self.state_context():
+            self._state.status = models.DownloadTaskStatus.Failed

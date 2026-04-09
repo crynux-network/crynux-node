@@ -1,6 +1,0 @@
----
-globs: *.vue
-alwaysApply: false
----
-When writing page components, always use standard components from ant-design-vue for implementation. Unless there is a very special requirement, do not write custom styles; use only the styles and configurable options provided by the standard components.
-Use ant-design-vue version 4.x in this project. You can view the latest component list and usage guide online at: https://www.antdv.com/components/overview/

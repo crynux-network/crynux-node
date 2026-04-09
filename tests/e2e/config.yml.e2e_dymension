@@ -6,17 +6,15 @@ log:
   level: "INFO"
 
 ethereum:
-  # The JSON RPC endpoint of the Blockchain node
-  # Here we use the private chain for the Hydrogen Network
+  # Keep online chain for e2e integration
   provider: "https://json-rpc.testnet-dym.crynux.io"
   network: "dymension"
 
-  # The Blockchain params
-  # Leave it as is for the private chain used in the Hydrogen Network
+  # Blockchain parameters
   gas_price: 700000000
   gas: 8000000
 
-  # The deployed addresses of the smart contracts
+  # Contract addresses are replaced with e2e-specific values before build
   contract:
     benefit_address: "0xa4AC846337794C93d68D387Be77663e32AD415bb"
     credits: "0xb592ee9c75873E13501e2eF1e2c31604C056f197"
@@ -24,31 +22,25 @@ ethereum:
     delegated_staking: "0x4b0946BB12474332D865AfAc5F77554b503C5570"
 
 # The database used to store the local state data
-# The data will not be large. A sqlite file is more than enough
-# There is no need to mount this file to the host machine to persist it
 db:
-  # The database dirver, can only be sqlite now
+  # The database driver, can only be sqlite now
   driver: sqlite
   # The sqlite database file
   filename: db/server.db
 
 # The URL of the Relay
-relay_url: "https://relay.crynux.io"
+relay_url: "http://crynux_relay:8080"
 
 # The directory that stores the distribution files of the WebUI
-web_dist: src/webui/dist
+web_dist: dist
 
 # The resource dir for icons etc.
 resource_dir: res
 
 task_config:
   # Models that will be preloaded before any task execution
-  # Other models specified by the task
-  # will be downloaded during the task execution
   preloaded_models:
     sd_base:
-      - id: "crynux-network/stable-diffusion-v1-5"
-        variant: "fp16"
       - id: "crynux-network/sdxl-turbo"
         variant: "fp16"
     gpt_base:
@@ -56,7 +48,7 @@ task_config:
     controlnet: []
     lora: []
 
-  # The proxy server used when downloading models.
+  # The proxy server used when downloading models
   proxy:
     host: ""
     port: 33210

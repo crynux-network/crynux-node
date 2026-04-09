@@ -1,7 +1,0 @@
----
-globs: *.vue,*.js, *.py
-alwaysApply: false
----
-description: |
-  Do not explain code changes in comments, such as "added xxx" or "removed xxx because xxx". Only describe the functionality of the final code. Keep comments concise and only add them for complex or non-obvious logic.
-  Do not use comments to delete code; directly remove the code without adding explanations about what was deleted.
