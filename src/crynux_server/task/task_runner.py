@@ -57,6 +57,7 @@ class InferenceTaskRunnerBase(ABC):
         self.contracts = contracts
 
         self._state: Optional[models.InferenceTaskState] = None
+        self._invalidated_result_uploaded = False
 
     @property
     def state(self) -> models.InferenceTaskState:
@@ -141,6 +142,11 @@ class InferenceTaskRunnerBase(ABC):
 
     # Task in these status is already finished, therefore should stop the worker's process
     def should_stop(self):
+        if (
+            self.state.status == models.InferenceTaskStatus.EndInvalidated
+            and self._invalidated_result_uploaded
+        ):
+            return True
         return self.state.status in [
             models.InferenceTaskStatus.EndAborted,
             models.InferenceTaskStatus.EndGroupRefund,
@@ -174,6 +180,8 @@ class InferenceTaskRunnerBase(ABC):
                     or status == models.InferenceTaskStatus.EndInvalidated
                 ):
                     await self.upload_result()
+                    if status == models.InferenceTaskStatus.EndInvalidated:
+                        self._invalidated_result_uploaded = True
 
     # Send task status when it changes
     # task_status_consumer will receive and handle the status
