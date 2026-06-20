@@ -17,7 +17,7 @@ a = Analysis(
         ('res', 'res'),
         ('webui', 'webui'),
     ] + collect_data_files('crynux_server.contracts.abi'),
-    hiddenimports=['aiosqlite', "crynux_server.contracts.abi", "pkg_resources.extern"],
+    hiddenimports=['aiosqlite', "crynux_server.contracts.abi"],
     collect_submodules=["crynux_server.contracts.abi"],
     collect_data=["crynux_server.contracts.abi"],
     module_collection_mode={

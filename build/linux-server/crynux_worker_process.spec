@@ -1,18 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_data_files
-from PyInstaller.utils.hooks import collect_dynamic_libs
 from PyInstaller.utils.hooks import copy_metadata
 
 scipy_hiddenimports = collect_submodules('scipy')
 scipy_datas = collect_data_files('scipy')
-binaries = collect_dynamic_libs('bitsandbytes')
+rfc3987_syntax_datas = collect_data_files('rfc3987_syntax')
+binaries = []
 metadata_packages = [
     ('diffusers', True),
     ('transformers', True),
     ('accelerate', False),
     ('attrs', False),
-    ('bitsandbytes', False),
     ('compel', False),
     ('controlnet-aux', False),
     ('datasets', False),
@@ -20,7 +19,6 @@ metadata_packages = [
     ('fsspec', False),
     ('huggingface-hub', False),
     ('imageio', False),
-    ('jax', False),
     ('jsonschema', False),
     ('lazy-loader', False),
     ('mediapipe', False),
@@ -40,7 +38,6 @@ metadata_packages = [
     ('sympy', False),
     ('tiktoken', False),
     ('torch', False),
-    ('torchaudio', False),
     ('torchvision', False),
     ('urllib3', False),
     ('websockets', False),
@@ -54,10 +51,9 @@ a = Analysis(
     ['worker/crynux_worker_process.py'],
     pathex=[],
     binaries=binaries,
-    datas=scipy_datas + metadata_datas,
+    datas=scipy_datas + rfc3987_syntax_datas + metadata_datas,
     hiddenimports=[
         "diffusers.pipelines.stable_diffusion_xl.pipeline_output",
-        "pkg_resources.extern",
     ] + scipy_hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -69,9 +65,11 @@ a = Analysis(
         'sd_task': 'py',
         'gpt_task': 'py',
         'crynux_worker': 'py',
-        'bitsandbytes': 'pyz+py',
     },
-    excludes=[],
+    excludes=[
+        "pkg_resources",
+        "setuptools",
+    ],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
