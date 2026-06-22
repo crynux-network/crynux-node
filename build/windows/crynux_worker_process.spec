@@ -1,13 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_dynamic_libs
 from PyInstaller.utils.hooks import copy_metadata
 
 scipy_hiddenimports = collect_submodules('scipy')
 scipy_datas = collect_data_files('scipy')
 rfc3987_syntax_datas = collect_data_files('rfc3987_syntax')
-binaries = []
+bitsandbytes_binaries = collect_dynamic_libs('bitsandbytes')
+binaries = bitsandbytes_binaries
 metadata_packages = [
+    ('bitsandbytes', False),
     ('diffusers', True),
     ('transformers', True),
     ('accelerate', False),
