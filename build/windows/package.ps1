@@ -42,7 +42,7 @@ Copy-Item -Recurse "webui/dist" "dist/Crynux Node/webui/dist"
 Copy-Item -Recurse "res" "dist/Crynux Node/res"
 
 # Create the archive file
-$VERSION = "3.0.0"
+$VERSION = "3.1.0"
 $BLOCKCHAIN_SUFFIX = ""
 if ($BLOCKCHAIN -ne "") {
     $BLOCKCHAIN_SUFFIX = "-$BLOCKCHAIN"

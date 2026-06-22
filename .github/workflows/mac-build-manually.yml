@@ -21,7 +21,7 @@ on:
         default: 'base'
 
 env:
-  RELEASE_VERSION: 3.0.0
+  RELEASE_VERSION: 3.1.0
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
