@@ -52,7 +52,7 @@ task_config:
       - id: "crynux-network/stable-diffusion-v1-5"
         variant: "fp16"
     gpt_base:
-      - id: "Qwen/Qwen3.5-9B"
+      - id: "qwen/qwen3-8b"
     controlnet: []
     lora: []
 

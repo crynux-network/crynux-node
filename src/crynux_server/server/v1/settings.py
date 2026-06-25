@@ -34,17 +34,21 @@ async def get_settings():
     except ValueError:
         try:
             contracts = get_contracts()
-            min_staking_amount = (
-                await contracts.node_staking_contract.get_min_stake_amount()
-            )
-            staking_amount = await to_thread.run_sync(
-                ensure_staking_amount, min_staking_amount
-            )
-        except Exception as e:
-            _logger.warning(
-                "Cannot initialize staking amount from chain: %s", e, exc_info=True
-            )
+        except AssertionError:
             staking_amount = None
+        else:
+            try:
+                min_staking_amount = (
+                    await contracts.node_staking_contract.get_min_stake_amount()
+                )
+                staking_amount = await to_thread.run_sync(
+                    ensure_staking_amount, min_staking_amount
+                )
+            except Exception as e:
+                _logger.warning(
+                    "Cannot initialize staking amount from chain: %s", e, exc_info=True
+                )
+                staking_amount = None
     return SettingsResponse(staking_amount=staking_amount)
 
 

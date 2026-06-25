@@ -10,7 +10,7 @@ on:
       - '*'
 
 env:
-  RELEASE_VERSION: 3.1.0
+  RELEASE_VERSION: 3.2.0
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 

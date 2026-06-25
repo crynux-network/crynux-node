@@ -212,7 +212,7 @@ class Contracts(object):
             receipt = await w3.eth.wait_for_transaction_receipt(tx_hash)
             return receipt
         
-    async def stake(self, amount: int, *, option: "Optional[TxOption]" = None):
+    async def get_stake_tx_value(self, amount: int) -> Optional[int]:
         async with await self._w3_pool.get() as w3:
             value = 0
             current_staking_info = await self.node_staking_contract.get_staking_info(
@@ -220,7 +220,7 @@ class Contracts(object):
             )
             current_staking_amount = current_staking_info.staked_balance + current_staking_info.staked_credits
             if amount == current_staking_amount:
-                return
+                return None
 
             min_staking_amount = await self.node_staking_contract.get_min_stake_amount(w3=w3)
             if amount < min_staking_amount:
@@ -234,7 +234,13 @@ class Contracts(object):
                 if stakable_credits < diff:
                     value = diff - stakable_credits
 
-            return await self.node_staking_contract.stake(amount, value=value, option=option, w3=w3)
+            return value
+
+    async def stake(self, amount: int, *, option: "Optional[TxOption]" = None):
+        value = await self.get_stake_tx_value(amount)
+        if value is None:
+            return None
+        return await self.node_staking_contract.stake(amount, value=value, option=option)
 
 _default_contracts: Optional[Contracts] = None
 
