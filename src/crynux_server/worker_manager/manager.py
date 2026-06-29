@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, contextmanager, suppress
 from typing import Dict, Optional
 
 import psutil
-from anyio import Condition, fail_after, sleep
+from anyio import Condition, Lock, fail_after, sleep
 
 from crynux_server.config import Config, get_config
 from crynux_server.models import TaskInput
@@ -31,10 +31,12 @@ class WorkerManager(object):
         self._current_worker_id = 0
 
         self._worker_process: Optional[subprocess.Popen] = None
+        self._worker_pid_file: Optional[str] = None
 
         self._version: Optional[str] = None
 
         self._connect_condition = Condition()
+        self._restart_lock = Lock()
 
     @property
     def version(self):
@@ -43,10 +45,12 @@ class WorkerManager(object):
     def _kill_process_tree(self, pid: int):
         try:
             process = psutil.Process(pid)
-            for proc in process.children(recursive=True):
+            processes = process.children(recursive=True)
+            for proc in processes:
                 with suppress(psutil.NoSuchProcess):
                     proc.kill()
             process.kill()
+            psutil.wait_procs(processes + [process], timeout=10)
         except psutil.NoSuchProcess:
             pass
 
@@ -72,8 +76,7 @@ class WorkerManager(object):
             self._kill_process_tree(pid)
             self._remove_worker_pid_file(worker_pid_file)
 
-    @contextmanager
-    def start(self):
+    def _get_worker_process_args(self):
         if self.config.task_config is not None:
             script_dir = self.config.task_config.script_dir
             patch_url = self.config.task_config.worker_patch_url
@@ -124,22 +127,57 @@ class WorkerManager(object):
         log_config = {"dir": self.config.log.dir, "level": self.config.log.level}
         envs["cw_log"] = json.dumps(log_config)
 
+        return args, envs, worker_pid_file
+
+    def _start_worker_process(self):
+        args, envs, worker_pid_file = self._get_worker_process_args()
         self._clear_old_worker_process(worker_pid_file)
 
         p = subprocess.Popen(args=args, env=envs)
         self._worker_process = p
-        
-        # Check if process is still alive immediately after start
+        self._worker_pid_file = worker_pid_file
+
         if p.poll() is not None:
-            # Process has already terminated
             raise RuntimeError(f"Worker process failed to start. Exit code: {p.returncode}")
-        
+
+    def _stop_worker_process(self):
+        if self._worker_process is not None:
+            self._kill_process_tree(self._worker_process.pid)
+            if self._worker_pid_file is not None:
+                self._remove_worker_pid_file(self._worker_pid_file)
+            self._worker_process = None
+            self._worker_pid_file = None
+
+    @contextmanager
+    def start(self):
+        self._start_worker_process()
         try:
             yield
         finally:
-            if self._worker_process is not None:
-                self._kill_process_tree(self._worker_process.pid)
-                self._worker_process = None
+            self._stop_worker_process()
+
+    async def _clear_worker_connection(self):
+        for task_result in self._task_futures.values():
+            if not task_result.done():
+                task_result.cancel()
+        self._task_futures.clear()
+
+        async with self._connect_condition:
+            self._current_worker_id = 0
+            self._version = None
+            self._connect_condition.notify_all()
+
+    async def restart(self, reason: Optional[str] = None):
+        async with self._restart_lock:
+            if reason is None:
+                _logger.warning("Restarting worker process")
+            else:
+                _logger.warning("Restarting worker process: %s", reason)
+
+            self._stop_worker_process()
+            await self._clear_worker_connection()
+            self._start_worker_process()
+            _logger.info("Worker process restarted")
 
     def is_worker_process_alive(self) -> bool:
         """
@@ -169,19 +207,10 @@ class WorkerManager(object):
         return worker_id
 
     async def disconnect(self, worker_id: int):
-        assert (
-            worker_id == self._current_worker_id
-        ), f"Worker {worker_id} is disconnected"
-        # cancel the worker's running task
-        for task_result in self._task_futures.values():
-            if not task_result.done():
-                task_result.cancel()
-        self._task_futures.clear()
-
-        async with self._connect_condition:
-            self._current_worker_id = 0
-            self._version = None
-            self._connect_condition.notify_all()
+        if worker_id != self._current_worker_id:
+            _logger.info("Ignore stale worker %s disconnect", worker_id)
+            return
+        await self._clear_worker_connection()
 
     async def is_connected(self) -> bool:
         return self._current_worker_id > 0

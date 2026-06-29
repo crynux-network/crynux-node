@@ -25,7 +25,11 @@ from crynux_server.download_model_cache import (DownloadModelCache,
                                                 get_download_model_cache)
 from crynux_server.relay import Relay, get_relay
 from crynux_server.relay.exceptions import RelayError
-from crynux_server.worker_manager import TaskExecutionError, TaskInvalid
+from crynux_server.worker_manager import (
+    TaskExecutionError,
+    TaskInvalid,
+    get_worker_manager,
+)
 
 from .state_cache import (DownloadTaskStateCache, InferenceTaskStateCache,
                           get_download_task_state_cache,
@@ -219,13 +223,27 @@ class InferenceTaskRunnerBase(ABC):
         except TimeoutError:
             # cancel task
             if not self.should_stop():
-                await self.cancel_task()
-                async with self.state_context():
-                    self.state.status = models.InferenceTaskStatus.EndAborted
+                try:
+                    await self.cancel_task()
+                finally:
+                    async with self.state_context():
+                        self.state.status = models.InferenceTaskStatus.EndAborted
+                    await self.restart_worker_after_timeout()
         finally:
             if self.should_stop():
                 with move_on_after(5, shield=True):
                     await self.cleanup()
+
+    async def restart_worker_after_timeout(self):
+        reason = f"task {self.task_id_commitment.hex()} timed out"
+        try:
+            with move_on_after(30, shield=True) as cancel_scope:
+                await get_worker_manager().restart(reason=reason)
+            if cancel_scope.cancel_called:
+                _logger.error("Restart worker process timed out after task timeout")
+        except Exception as e:
+            _logger.exception(e)
+            _logger.error("Restart worker process failed after task timeout")
 
 
 class InferenceTaskRunner(InferenceTaskRunnerBase):
