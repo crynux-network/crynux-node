@@ -1,4 +1,5 @@
 from .download_model import DownloadedModel, ModelConfig
+from .model_name import normalize_model_name, normalize_task_args_model_names
 from .event import (EventType, Event, DownloadModel, TaskEndAborted, TaskEndGroupRefund,
                     TaskEndGroupSuccess, TaskEndInvalidated, TaskEndSuccess,
                     TaskErrorReported, TaskScoreReady, TaskStarted,
@@ -60,4 +61,6 @@ __all__ = [
     "ErrorResult",
     "TaskResult",
     "DownloadedModel",
+    "normalize_model_name",
+    "normalize_task_args_model_names",
 ]

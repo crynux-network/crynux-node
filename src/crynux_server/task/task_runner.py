@@ -350,6 +350,9 @@ class InferenceTaskRunner(InferenceTaskRunnerBase):
                 self.config.task_config.output_dir, self.task_id_commitment.hex()
             )
             task = await get_task()
+            task.task_args = models.normalize_task_args_model_names(
+                task.task_args, self.state.task_type
+            )
 
             if self.state.task_type == models.TaskType.SD_FT_LORA:
                 args = json.loads(task.task_args)

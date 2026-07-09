@@ -1,7 +1,8 @@
 from typing import List, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
+from .model_name import normalize_model_name
 from .task import TaskType
 
 
@@ -9,6 +10,11 @@ class ModelConfig(BaseModel):
     id: str
     type: Literal["base", "lora", "controlnet"]
     variant: str | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _normalize_id(cls, v: str) -> str:
+        return normalize_model_name(v)
 
     def to_model_id(self) -> str:
         model_body = self.id
