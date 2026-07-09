@@ -4,6 +4,7 @@ import re
 from typing import List, Literal
 
 import imhash
+from anyio import get_cancelled_exc_class
 from crynux_server.models import (
     InferenceTaskInput,
     TaskInput,
@@ -42,7 +43,14 @@ async def run_inference_task(
         )
     )
     task_result = await worker_manager.send_task(task_input)
-    await task_result.get()
+    try:
+        await task_result.get()
+    except get_cancelled_exc_class():
+        # Drop the queued task so it is never sent to the worker
+        # after the awaiting runner has been cancelled
+        if not task_result.done():
+            task_result.cancel()
+        raise
 
     files: List[str] = []
     hashes: List[bytes] = []

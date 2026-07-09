@@ -21,14 +21,22 @@ async def task_producer(
     while True:
         try:
             with fail_after(1):
-                task_input, _ = await worker_manager.get_task(worker_id)
-                await websocket.send_json(task_input.model_dump())
+                task_input, task_future = await worker_manager.get_task(worker_id)
         except TimeoutError:
             try:
                 await websocket.send_text("")
                 continue
             except WebSocketDisconnect:
                 raise
+        # A done or cancelled future means the task runner has stopped
+        # waiting for this task, so it must not be sent to the worker
+        if task_future.done():
+            _logger.info(
+                f"Skip sending task {task_input.task.task_id} to worker "
+                f"{worker_id} because the task has been cancelled or done"
+            )
+            continue
+        await websocket.send_json(task_input.model_dump())
 
 
 async def result_consumer(

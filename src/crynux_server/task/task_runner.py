@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Awaitable, Callable, List, Optional
 
+import httpx
 from anyio import (create_memory_object_stream, create_task_group, fail_after,
                    get_cancelled_exc_class, move_on_after, sleep, to_thread)
 from anyio.streams.memory import (MemoryObjectReceiveStream,
@@ -43,6 +44,12 @@ OkCallback = Callable[[bool], Awaitable[None]]
 ErrCallback = Callable[[Exception], Awaitable[None]]
 
 
+# The relay authoritatively answered that the task does not exist,
+# so the local task must be aborted and never retried
+class TaskNotFoundError(Exception):
+    pass
+
+
 # Manage the lifestyle of one task
 class InferenceTaskRunnerBase(ABC):
     @abstractmethod
@@ -62,6 +69,8 @@ class InferenceTaskRunnerBase(ABC):
 
         self._state: Optional[models.InferenceTaskState] = None
         self._invalidated_result_uploaded = False
+        self._execution_started = False
+        self._execution_finished = False
 
     @property
     def state(self) -> models.InferenceTaskState:
@@ -166,7 +175,6 @@ class InferenceTaskRunnerBase(ABC):
     async def task_status_consumer(
         self, status_receiver: MemoryObjectReceiveStream[models.InferenceTaskStatus]
     ):
-        executed = False
         async with status_receiver:
             async for status in status_receiver:
                 _logger.info(
@@ -175,9 +183,10 @@ class InferenceTaskRunnerBase(ABC):
                 if (
                     status == models.InferenceTaskStatus.Started
                     or status == models.InferenceTaskStatus.ParametersUploaded
-                ) and not executed:
+                ) and not self._execution_started:
+                    self._execution_started = True
                     await self.execute_task()
-                    executed = True
+                    self._execution_finished = True
                 elif (
                     status == models.InferenceTaskStatus.Validated
                     or status == models.InferenceTaskStatus.GroupValidated
@@ -186,6 +195,15 @@ class InferenceTaskRunnerBase(ABC):
                     await self.upload_result()
                     if status == models.InferenceTaskStatus.EndInvalidated:
                         self._invalidated_result_uploaded = True
+
+    # The relay authoritatively answered that the task does not exist,
+    # so end the task locally to stop retries and restart recovery replays
+    async def _abort_not_found_task(self):
+        _logger.error(
+            f"Task {self.task_id_commitment.hex()} does not exist on the relay, abort it locally"
+        )
+        async with self.state_context():
+            self.state.status = models.InferenceTaskStatus.EndAborted
 
     # Send task status when it changes
     # task_status_consumer will receive and handle the status
@@ -198,14 +216,29 @@ class InferenceTaskRunnerBase(ABC):
             await status_sender.send(self.state.status)
             while not self.should_stop():
                 last_status = self.state.status
-                await self.sync_state()
+                try:
+                    await self.sync_state()
+                except TaskNotFoundError:
+                    await self._abort_not_found_task()
+                except (RelayError, httpx.TransportError) as e:
+                    # Transient relay errors must not crash the runner,
+                    # skip this poll cycle and try again
+                    _logger.warning(
+                        f"Sync state of task {self.task_id_commitment.hex()} failed "
+                        f"due to a transient relay error, skip this poll cycle: {e}"
+                    )
+                    await sleep(interval)
+                    continue
                 if last_status != self.state.status:
                     await status_sender.send(self.state.status)
                 await sleep(interval)
 
     async def run(self, interval: float = 1):
         try:
-            await self.sync_state()
+            try:
+                await self.sync_state()
+            except TaskNotFoundError:
+                await self._abort_not_found_task()
             if self.should_stop():
                 return
             delay = self.state.timeout - time.time() + 5
@@ -221,21 +254,37 @@ class InferenceTaskRunnerBase(ABC):
                     tg.start_soon(self.task_status_consumer, status_receiver)
                     tg.start_soon(self.task_status_producer, status_sender, interval)
         except TimeoutError:
-            # cancel task
             if not self.should_stop():
+                # local timeout, cancel the task on the relay
                 try:
                     await self.cancel_task()
                 finally:
                     async with self.state_context():
                         self.state.status = models.InferenceTaskStatus.EndAborted
                     await self.restart_worker_after_timeout()
+            else:
+                # the task has ended remotely but the local runner did not
+                # finish before the timeout
+                _logger.error(
+                    f"Task {self.task_id_commitment.hex()} ended remotely with status "
+                    f"{self.state.status.name} before the local task runner finished"
+                )
+                if self._execution_started and not self._execution_finished:
+                    # the worker may be stuck on this task, restart it
+                    await self.restart_worker_after_timeout(
+                        reason=(
+                            f"task {self.task_id_commitment.hex()} ended remotely "
+                            "with unfinished local execution"
+                        )
+                    )
         finally:
             if self.should_stop():
                 with move_on_after(5, shield=True):
                     await self.cleanup()
 
-    async def restart_worker_after_timeout(self):
-        reason = f"task {self.task_id_commitment.hex()} timed out"
+    async def restart_worker_after_timeout(self, reason: Optional[str] = None):
+        if reason is None:
+            reason = f"task {self.task_id_commitment.hex()} timed out"
         try:
             with move_on_after(30, shield=True) as cancel_scope:
                 await get_worker_manager().restart(reason=reason)
@@ -289,6 +338,8 @@ class InferenceTaskRunner(InferenceTaskRunnerBase):
             )
 
     # Get task info
+    # Only 400 "Task not found" means the task authoritatively does not exist
+    # on the relay; all other relay errors are transient and re-raised as-is
     async def get_task(self):
         try:
             task = await self.relay.get_task(self.task_id_commitment)
@@ -296,13 +347,15 @@ class InferenceTaskRunner(InferenceTaskRunnerBase):
             _logger.error(
                 f"Get task {self.task_id_commitment.hex()} failed due to {e.message}"
             )
-            raise ValueError("Task not found")
+            if e.status_code == 400 and "Task not found" in e.message:
+                raise TaskNotFoundError
+            raise
         # task not exist
         if task.task_id_commitment != self.task_id_commitment:
             _logger.error(
                 f"local task id commitment: {self.task_id_commitment.hex()}, remote task id commitment: {task.task_id_commitment.hex()}"
             )
-            raise ValueError("Task not found")
+            raise TaskNotFoundError
         return task
 
     async def cancel_task(self):
