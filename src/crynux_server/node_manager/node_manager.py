@@ -518,14 +518,6 @@ class NodeManager(object):
 
         self._watcher.add_event_filter("NodeSlashed", callback=_node_slashed)
 
-        async def _inference_task_started(event: models.Event):
-            assert isinstance(event, models.TaskStarted)
-            assert self._task_system is not None
-
-            await self._task_system.create_inference_task(event.task_id_commitment)
-
-        self._watcher.add_event_filter("TaskStarted", callback=_inference_task_started)
-
         async def _download_task_started(event: models.Event):
             assert isinstance(event, models.DownloadModel)
             assert self._task_system is not None

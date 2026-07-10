@@ -1,7 +1,7 @@
 import hashlib
 import os
 import re
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 import imhash
 from anyio import get_cancelled_exc_class
@@ -30,6 +30,7 @@ async def run_inference_task(
     models: List[ModelConfig],
     task_args: str,
     task_dir: str,
+    deadline: Optional[float] = None,
 ):
     worker_manager = get_worker_manager()
     task_input = TaskInput(
@@ -42,7 +43,7 @@ async def run_inference_task(
             output_dir=task_dir,
         )
     )
-    task_result = await worker_manager.send_task(task_input)
+    task_result = await worker_manager.send_task(task_input, deadline=deadline)
     try:
         await task_result.get()
     except get_cancelled_exc_class():

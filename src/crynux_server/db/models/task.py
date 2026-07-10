@@ -38,6 +38,9 @@ class InferenceTaskState(Base, BaseMixin):
     checkpoint: Mapped[Optional[str]] = mapped_column(
         nullable=True, index=False, default=""
     )
+    result_uploaded: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, index=False, default=False
+    )
 
 
 class DownloadTaskState(Base, BaseMixin):

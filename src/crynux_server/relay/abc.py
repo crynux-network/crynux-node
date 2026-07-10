@@ -10,7 +10,6 @@ from crynux_server.models import (
     EventType,
     NodeInfo,
     RelayTask,
-    TaskAbortReason,
     TaskError,
 )
 
@@ -45,11 +44,6 @@ class Relay(ABC):
 
     @abstractmethod
     async def submit_task_score(self, task_id_commitment: bytes, score: bytes): ...
-
-    @abstractmethod
-    async def abort_task(
-        self, task_id_commitment: bytes, abort_reason: TaskAbortReason
-    ): ...
 
     @abstractmethod
     async def upload_task_result(

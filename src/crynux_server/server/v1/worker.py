@@ -4,9 +4,7 @@ from anyio import create_task_group, fail_after
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from crynux_server.models import TaskResult
-from crynux_server.worker_manager import (TaskDownloadError,
-                                          TaskExecutionError, TaskInvalid,
-                                          WorkerManager, is_task_invalid)
+from crynux_server.worker_manager import WorkerManager
 
 from ..depends import WorkerManagerDep
 
@@ -45,25 +43,7 @@ async def result_consumer(
     while True:
         raw_result = await websocket.receive_json()
         result = TaskResult.model_validate(raw_result)
-        with worker_manager.task_future(worker_id, result.task_id_commitment) as fut:
-            if fut.cancelled():
-                _logger.info(f"Task {result.task_id_commitment} has been cancelled before")
-            elif fut.done():
-                _logger.info(f"Task {result.task_id_commitment} has been done before")
-            else:
-                if result.result.status == "success":
-                    fut.set_result(None)
-                elif result.result.status == "error":
-                    err_msg = result.result.traceback
-                    if result.task_name == "inference":
-                        if is_task_invalid(err_msg):
-                            exc = TaskInvalid(err_msg)
-                        else:
-                            exc = TaskExecutionError(err_msg)
-                        fut.set_error(exc)
-                    elif result.task_name == "download":
-                        exc = TaskDownloadError(err_msg)
-                        fut.set_error(exc)
+        await worker_manager.report_task_result(worker_id, result)
 
 
 @router.websocket("/")

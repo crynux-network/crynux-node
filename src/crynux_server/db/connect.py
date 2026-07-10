@@ -5,6 +5,7 @@ import threading
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+import sqlalchemy as sa
 from anyio import fail_after
 from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import (AsyncEngine, AsyncSession,
@@ -58,6 +59,17 @@ async def init(db: DBConfig | None = None):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all never alters existing tables, so columns added to
+        # existing tables must be created here for old databases
+        res = await conn.execute(sa.text("PRAGMA table_info(inference_task_states)"))
+        columns = {row[1] for row in res}
+        if "result_uploaded" not in columns:
+            await conn.execute(
+                sa.text(
+                    "ALTER TABLE inference_task_states "
+                    "ADD COLUMN result_uploaded BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
 
     _local.engine = engine
     _local.session = session

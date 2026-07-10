@@ -1,85 +1,65 @@
+import os
+
 import pytest
 
-from datetime import datetime
-
 from crynux_server import db
-from crynux_server.models import TaskState, TaskStatus
-from crynux_server.task.state_cache import DbTaskStateCache, MemoryTaskStateCache
+from crynux_server.config import DBConfig
+from crynux_server.models import (InferenceTaskState, InferenceTaskStatus,
+                                  TaskType)
+from crynux_server.task import (DbInferenceTaskStateCache,
+                                MemoryInferenceTaskStateCache)
+
+TASK_ID = bytes([1] * 32)
 
 
-async def test_memory_state_cache():
-    cache = MemoryTaskStateCache()
-
-    state = TaskState(
-        task_id=1,
-        round=1,
-        status=TaskStatus.Pending,
+def make_state() -> InferenceTaskState:
+    return InferenceTaskState(
+        task_id_commitment=TASK_ID,
+        timeout=900,
+        status=InferenceTaskStatus.Started,
+        task_type=TaskType.SD,
         files=["test.png"],
-        result=bytes.fromhex("01020405060708"),
-        timeout=900
+        score=bytes([1] * 8),
+        checkpoint="",
     )
-
-    start = datetime.now()
-    await cache.dump(state)
-
-    _state = await cache.load(state.task_id)
-
-    assert state == _state
-
-    assert await cache.has(state.task_id)
-
-    assert len(await cache.find()) == 1
-    assert len(await cache.find(start=start, end=datetime.now())) == 1
-    assert len(await cache.find(start=datetime.now())) == 0
-    assert len(await cache.find(start=start, end=datetime.now(), status=[TaskStatus.Pending])) == 1
-    assert len(await cache.find(start=start, end=datetime.now(), status=[TaskStatus.Success])) == 0
-
-    state.status = TaskStatus.Success
-    await cache.dump(state)
-    assert len(await cache.find()) == 1
-    assert len(await cache.find(start=start, end=datetime.now())) == 1
-    assert len(await cache.find(start=datetime.now())) == 0
-    assert len(await cache.find(start=start, end=datetime.now(), status=[TaskStatus.Pending])) == 0
-    assert len(await cache.find(start=start, end=datetime.now(), status=[TaskStatus.Success])) == 1
 
 
 @pytest.fixture
-async def init_db():
-    await db.init("sqlite+aiosqlite://")
+async def init_db(tmp_path):
+    filename = str(tmp_path / "test.db")
+    await db.init(DBConfig.model_validate({"driver": "sqlite", "filename": filename}))
     yield
     await db.close()
+    if os.path.exists(filename):
+        os.remove(filename)
+
+
+async def run_cache_roundtrip(cache):
+    state = make_state()
+    await cache.dump(state)
+
+    assert await cache.has(TASK_ID)
+    loaded = await cache.load(TASK_ID)
+    assert loaded == state
+    assert not loaded.result_uploaded
+
+    state.status = InferenceTaskStatus.Validated
+    state.result_uploaded = True
+    await cache.dump(state)
+
+    loaded = await cache.load(TASK_ID)
+    assert loaded.status == InferenceTaskStatus.Validated
+    assert loaded.result_uploaded
+
+    states = await cache.find(status=[InferenceTaskStatus.Validated])
+    assert len(states) == 1
+    assert states[0].result_uploaded
+    assert len(await cache.find(status=[InferenceTaskStatus.Started])) == 0
+
+
+async def test_memory_state_cache():
+    await run_cache_roundtrip(MemoryInferenceTaskStateCache())
 
 
 async def test_db_state_cache(init_db):
-    cache = DbTaskStateCache()
-
-    state = TaskState(
-        task_id=1,
-        round=1,
-        status=TaskStatus.Pending,
-        files=["test.png"],
-        result=bytes.fromhex("01020405060708"),
-        timeout=900,
-    )
-    
-    start = datetime.now()
-    await cache.dump(state)
-
-    _state = await cache.load(state.task_id)
-
-    assert state == _state
-
-    assert await cache.has(state.task_id)
-    assert len(await cache.find()) == 1
-    assert len(await cache.find(start=start, end=datetime.now())) == 1
-    assert len(await cache.find(start=datetime.now())) == 0
-    assert len(await cache.find(start=start, end=datetime.now(), status=[TaskStatus.Pending])) == 1
-    assert len(await cache.find(start=start, end=datetime.now(), status=[TaskStatus.Success])) == 0
-
-    state.status = TaskStatus.Success
-    await cache.dump(state)
-    assert len(await cache.find()) == 1
-    assert len(await cache.find(start=start, end=datetime.now())) == 1
-    assert len(await cache.find(start=datetime.now())) == 0
-    assert len(await cache.find(start=start, end=datetime.now(), status=[TaskStatus.Pending])) == 0
-    assert len(await cache.find(start=start, end=datetime.now(), status=[TaskStatus.Success])) == 1
+    await run_cache_roundtrip(DbInferenceTaskStateCache())

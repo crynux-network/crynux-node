@@ -13,8 +13,7 @@ from anyio import open_file, to_thread, wrap_file
 from hexbytes import HexBytes
 from web3 import Web3
 
-from crynux_server.models import (Event, EventType, TaskAbortReason, TaskError,
-                                  load_event)
+from crynux_server.models import Event, EventType, TaskError, load_event
 from crynux_server.models.node import ChainNodeStatus, NodeInfo
 from crynux_server.models.task import RelayTask
 from crynux_server.utils import get_address_from_privkey
@@ -182,27 +181,6 @@ class WebRelay(Relay):
             json={"score": score_hex, "timestamp": timestamp, "signature": signature},
         )
         resp = _process_resp(resp, "submitTaskScore")
-
-    @_web_relay_restart_pool_error
-    async def abort_task(
-        self, task_id_commitment: bytes, abort_reason: TaskAbortReason
-    ):
-        task_id_commitment_hex = HexBytes(task_id_commitment).hex()
-        input = {
-            "task_id_commitment": task_id_commitment_hex,
-            "abort_reason": abort_reason,
-        }
-        timestamp, signature = self.signer.sign(input)
-
-        resp = await self.client.post(
-            f"/v1/inference_tasks/{task_id_commitment_hex}/abort_reason",
-            json={
-                "abort_reason": abort_reason,
-                "timestamp": timestamp,
-                "signature": signature,
-            },
-        )
-        resp = _process_resp(resp, "abortTask")
 
     @_web_relay_restart_pool_error
     async def upload_task_result(

@@ -127,6 +127,7 @@ class InferenceTaskState(BaseModel):
     waiting_tx_hash: bytes = b""
     waiting_tx_method: str = ""
     checkpoint: Optional[str] = None
+    result_uploaded: bool = False
 
 
 class DownloadTaskState(BaseModel):

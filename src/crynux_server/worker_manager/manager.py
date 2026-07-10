@@ -1,21 +1,27 @@
+import asyncio
 import json
 import logging
 import os
 import subprocess
+import time
 from contextlib import asynccontextmanager, contextmanager, suppress
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 
 import psutil
 from anyio import Condition, Lock, fail_after, sleep
 
 from crynux_server.config import Config, get_config
-from crynux_server.models import TaskInput
+from crynux_server.models import TaskInput, TaskResult
 
+from .error import (TaskDownloadError, TaskExecutionError, TaskInvalid,
+                    is_task_invalid)
 from .exchange import TaskExchange
 from .task import TaskFuture
 from .utils import get_exe_head
 
 _logger = logging.getLogger(__name__)
+
+WATCHDOG_CHECK_INTERVAL = 1
 
 
 class WorkerManager(object):
@@ -29,6 +35,12 @@ class WorkerManager(object):
         self._next_worker_id = 1
         self._task_futures: Dict[str, TaskFuture] = {}
         self._current_worker_id = 0
+
+        # Watchdog entries: task id -> absolute execution deadline (unix time).
+        # An entry is cleared only by a worker-reported result or a restart.
+        self._task_deadlines: Dict[str, float] = {}
+        self._watchdog_task: Optional[asyncio.Task] = None
+        self._restart_tasks: Set[asyncio.Task] = set()
 
         self._worker_process: Optional[subprocess.Popen] = None
         self._worker_pid_file: Optional[str] = None
@@ -154,6 +166,9 @@ class WorkerManager(object):
         try:
             yield
         finally:
+            if self._watchdog_task is not None:
+                self._watchdog_task.cancel()
+                self._watchdog_task = None
             self._stop_worker_process()
 
     async def _clear_worker_connection(self):
@@ -161,6 +176,7 @@ class WorkerManager(object):
             if not task_result.done():
                 task_result.cancel()
         self._task_futures.clear()
+        self._task_deadlines.clear()
 
         async with self._connect_condition:
             self._current_worker_id = 0
@@ -229,7 +245,41 @@ class WorkerManager(object):
             await self._connect_condition.wait()
             yield
 
-    async def send_task(self, input: TaskInput):
+    def _spawn_restart(self, reason: str):
+        # The restart runs as an independent asyncio task so it survives the
+        # cancellation of its trigger (e.g. the worker websocket handler dying
+        # when the worker process is killed)
+        task = asyncio.get_running_loop().create_task(self.restart(reason=reason))
+        self._restart_tasks.add(task)
+        task.add_done_callback(self._restart_tasks.discard)
+
+    async def _watchdog(self):
+        while True:
+            await sleep(WATCHDOG_CHECK_INTERVAL)
+            now = time.time()
+            expired = [
+                task_id
+                for task_id, deadline in self._task_deadlines.items()
+                if deadline <= now
+            ]
+            if len(expired) > 0:
+                await self.restart(
+                    reason=(
+                        f"tasks {expired} produced no worker-reported result "
+                        "by their execution deadline"
+                    )
+                )
+
+    def _ensure_watchdog_running(self):
+        if self._watchdog_task is None or self._watchdog_task.done():
+            self._watchdog_task = asyncio.get_running_loop().create_task(
+                self._watchdog()
+            )
+
+    async def send_task(self, input: TaskInput, deadline: Optional[float] = None):
+        if deadline is not None:
+            self._task_deadlines[input.task.task_id] = deadline
+            self._ensure_watchdog_running()
         return await self._exchange.send_task(input)
 
     async def get_task(self, worker_id: int):
@@ -243,19 +293,49 @@ class WorkerManager(object):
 
         return task_input, task_future
 
-    @contextmanager
-    def task_future(self, worker_id: int, task_id_commitment: str):
+    async def report_task_result(self, worker_id: int, result: TaskResult):
         assert (
             worker_id == self._current_worker_id
         ), f"Worker {worker_id} is disconnected"
-        assert task_id_commitment in self._task_futures, f"No such task future {task_id_commitment}"
+        task_id_commitment = result.task_id_commitment
+        assert (
+            task_id_commitment in self._task_futures
+        ), f"No such task future {task_id_commitment}"
+
+        # A worker-reported result is the only completion that clears
+        # the watchdog entry besides a restart
+        self._task_deadlines.pop(task_id_commitment, None)
 
         fut = self._task_futures[task_id_commitment]
         try:
-            yield fut
+            if fut.cancelled():
+                _logger.info(f"Task {task_id_commitment} has been cancelled before")
+            elif fut.done():
+                _logger.info(f"Task {task_id_commitment} has been done before")
+            else:
+                if result.result.status == "success":
+                    fut.set_result(None)
+                elif result.result.status == "error":
+                    err_msg = result.result.traceback
+                    if result.task_name == "inference":
+                        if is_task_invalid(err_msg):
+                            fut.set_error(TaskInvalid(err_msg))
+                        else:
+                            fut.set_error(TaskExecutionError(err_msg))
+                    elif result.task_name == "download":
+                        fut.set_error(TaskDownloadError(err_msg))
         finally:
             if fut.done():
                 del self._task_futures[task_id_commitment]
+
+        if (
+            result.task_name == "inference"
+            and result.result.status == "error"
+            and not is_task_invalid(result.result.traceback)
+        ):
+            self._spawn_restart(
+                reason=f"task {task_id_commitment} failed with an execution error"
+            )
 
 _default_worker_manager: Optional[WorkerManager] = None
 
