@@ -16,7 +16,7 @@ from anyio import (TASK_STATUS_IGNORED, Event, create_task_group,
 from anyio.abc import TaskGroup, TaskStatus
 
 from crynux_server import db, log, utils
-from crynux_server.config import get_config, with_proxy
+from crynux_server.config import apply_server_env, get_config, with_proxy
 from crynux_server.node_manager import NodeManager, set_node_manager
 from crynux_server.server import Server, set_server
 from crynux_server.worker_manager import WorkerManager, set_worker_manager
@@ -26,6 +26,7 @@ _logger = logging.getLogger(__name__)
 
 class CrynuxRunner(object):
     def __init__(self) -> None:
+        apply_server_env()
         self.config = get_config()
 
         log.init(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from contextlib import contextmanager
@@ -8,6 +9,7 @@ from typing import Any, Dict, List, Literal, Tuple, Type, TypedDict, Optional
 
 import yaml
 from anyio import Condition, to_thread
+from dotenv import dotenv_values
 from pydantic import BaseModel, computed_field, Field
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
@@ -30,16 +32,47 @@ __all__ = [
     "get_staking_amount",
     "ensure_staking_amount",
     "set_staking_amount",
+    "env_file_path",
+    "load_env_file",
+    "apply_server_env",
 ]
 
 
 _data_dir: str = ""
 _config_dir: str = "config"
 ETHER_WEI = 10**18
+_logger = logging.getLogger(__name__)
 
 
 def config_file_path():
     return os.path.join(_data_dir, _config_dir, "config.yml")
+
+
+def env_file_path():
+    return os.path.join(_data_dir, _config_dir, ".env")
+
+
+def load_env_file(prefix: str) -> Dict[str, str]:
+    env_file = env_file_path()
+    if not os.path.exists(env_file):
+        return {}
+
+    values = dotenv_values(env_file)
+    return {
+        key.removeprefix(prefix): value
+        for key, value in values.items()
+        if key.startswith(prefix) and value is not None
+    }
+
+
+def apply_server_env():
+    envs = load_env_file("SERVER_")
+    os.environ.update(envs)
+    if len(envs) > 0:
+        _logger.info(
+            "Applied server environment variables from config .env: %s",
+            ", ".join(sorted(envs.keys())),
+        )
 
 
 class YamlConfigSettingsSource(PydanticBaseSettingsSource):

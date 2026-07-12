@@ -10,7 +10,7 @@ from typing import Dict, Optional, Set
 import psutil
 from anyio import Condition, Lock, fail_after, sleep
 
-from crynux_server.config import Config, get_config
+from crynux_server.config import Config, get_config, load_env_file
 from crynux_server.models import TaskInput, TaskResult
 
 from .error import (TaskDownloadError, TaskExecutionError, TaskInvalid,
@@ -138,6 +138,14 @@ class WorkerManager(object):
 
         log_config = {"dir": self.config.log.dir, "level": self.config.log.level}
         envs["cw_log"] = json.dumps(log_config)
+
+        worker_envs = load_env_file("WORKER_")
+        envs.update(worker_envs)
+        if len(worker_envs) > 0:
+            _logger.info(
+                "Applied worker environment variables from config .env: %s",
+                ", ".join(sorted(worker_envs.keys())),
+            )
 
         return args, envs, worker_pid_file
 

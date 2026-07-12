@@ -68,6 +68,12 @@ Copy ```config/config.yml.shell_example``` to ```config/config.yml```. And adjus
 $ cp config/config.yml.shell_example config/config.yml
 ```
 
+Optional process environment variables can be placed in `config/.env`. Variables
+with the `SERVER_` prefix are applied to the server process at startup with the
+prefix removed. Variables with the `WORKER_` prefix are applied to the worker
+process each time it starts with the prefix removed, so worker-specific changes
+take effect on the next worker restart. Other variables in this file are ignored.
+
 ### Prepare the server venv
 
 1. Create the venv in the root folder of the project:
