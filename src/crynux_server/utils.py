@@ -5,7 +5,7 @@ from collections import OrderedDict
 from typing import Any, Dict
 
 import psutil
-from anyio import Path, run_process, to_thread
+from anyio import run_process, to_thread
 from eth_account import Account
 from pydantic import BaseModel
 from web3 import Web3
@@ -213,6 +213,16 @@ class DiskInfo(BaseModel):
     temp_files: int = 0
 
 
+def _get_dir_size(path: str) -> int:
+    size = 0
+    for dirpath, _, filenames in os.walk(path):
+        for filename in filenames:
+            file_path = os.path.join(dirpath, filename)
+            if os.path.isfile(file_path) and not os.path.islink(file_path):
+                size += os.path.getsize(file_path)
+    return size
+
+
 async def get_disk_info(
     hf_model_dir: str,
     external_model_dir: str,
@@ -227,11 +237,8 @@ async def get_disk_info(
     }
     result = {}
     for key, path in key_dirs.items():
-        if await Path(path).exists():
-            size = 0
-            async for f in Path(path).rglob("*"):
-                if await f.is_file() and (not await f.is_symlink()):
-                    size += (await f.stat()).st_size
+        if os.path.exists(path):
+            size = await to_thread.run_sync(_get_dir_size, path)
             result[key] = size // 1024
     return DiskInfo(**result)
 
