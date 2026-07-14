@@ -685,13 +685,15 @@ class NodeManager(object):
                 self._tg = tg
 
                 try:
-                    async with self._worker_manager.wait_connected(timeout=30):
+                    # Cold-starting the bundled worker on Apple Silicon can take
+                    # more than 30 seconds before it can establish the websocket.
+                    async with self._worker_manager.wait_connected(timeout=120):
                         version = self._worker_manager.version
                         assert version is not None
                         version_list = [int(v) for v in version.split(".")]
                         assert len(version_list) == 3
                 except TimeoutError:
-                    raise ValueError("Worker is not connected within 30 seconds")
+                    raise ValueError("Worker is not connected within 120 seconds")
 
                 try:
                     async with create_task_group() as init_tg:
