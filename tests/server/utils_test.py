@@ -1,5 +1,104 @@
 from crynux_server import utils
 
+NVIDIA_SMI_HEADER = (
+    "index, uuid, name, utilization.gpu [%], memory.used [MiB], memory.total [MiB]"
+)
+
+SINGLE_GPU_OUTPUT = "\n".join(
+    [
+        NVIDIA_SMI_HEADER,
+        "0, GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, NVIDIA GeForce RTX 4090, 7 %, 1024 MiB, 24564 MiB",
+    ]
+)
+
+DUAL_GPU_OUTPUT = "\n".join(
+    [
+        NVIDIA_SMI_HEADER,
+        "0, GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, NVIDIA GeForce RTX 4090, 7 %, 1024 MiB, 24564 MiB",
+        "1, GPU-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb, NVIDIA GeForce RTX 4090, 55 %, 2048 MiB, 24564 MiB",
+    ]
+)
+
+MIXED_GPU_OUTPUT = "\n".join(
+    [
+        NVIDIA_SMI_HEADER,
+        "0, GPU-cccccccc-cccc-cccc-cccc-cccccccccccc, NVIDIA GeForce RTX 3060, 90 %, 512 MiB, 12288 MiB",
+        "1, GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa, NVIDIA GeForce RTX 4090, 7 %, 1024 MiB, 24564 MiB",
+        "2, GPU-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb, NVIDIA GeForce RTX 4090, 55 %, 2048 MiB, 24564 MiB",
+    ]
+)
+
+
+def test_parse_nvidia_smi_gpus():
+    cards = utils.parse_nvidia_smi_gpus(MIXED_GPU_OUTPUT)
+    assert len(cards) == 3
+    assert cards[0].index == 0
+    assert cards[0].uuid == "GPU-cccccccc-cccc-cccc-cccc-cccccccccccc"
+    assert cards[0].name == "NVIDIA GeForce RTX 3060"
+    assert cards[0].usage == 90
+    assert cards[0].vram_used_mb == 512
+    assert cards[0].vram_total_mb == 12288
+    assert cards[2].index == 2
+    assert cards[2].name == "NVIDIA GeForce RTX 4090"
+
+
+def test_aggregate_single_gpu():
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(SINGLE_GPU_OUTPUT))
+    assert info.model == "NVIDIA GeForce RTX 4090"
+    assert info.usage == 7
+    assert info.vram_used_mb == 1024
+    assert info.vram_total_mb == 24564
+    assert info.device_uuids == ["GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
+
+
+def test_aggregate_dual_identical_gpus():
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(DUAL_GPU_OUTPUT))
+    assert info.model == "2x NVIDIA GeForce RTX 4090"
+    assert info.usage == 55
+    assert info.vram_used_mb == 3072
+    assert info.vram_total_mb == 49128
+    assert info.device_uuids == [
+        "GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "GPU-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    ]
+
+
+def test_aggregate_mixed_gpus_selects_largest_group():
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(MIXED_GPU_OUTPUT))
+    assert info.model == "2x NVIDIA GeForce RTX 4090"
+    assert info.vram_total_mb == 49128
+    assert info.device_uuids == [
+        "GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "GPU-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    ]
+
+
+def test_group_size_tie_selects_larger_vram():
+    output = "\n".join(
+        [
+            NVIDIA_SMI_HEADER,
+            "0, GPU-dddddddd-dddd-dddd-dddd-dddddddddddd, NVIDIA GeForce RTX 4090, 7 %, 1024 MiB, 24564 MiB",
+            "1, GPU-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee, NVIDIA GeForce RTX 5090, 3 %, 512 MiB, 32607 MiB",
+        ]
+    )
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(output))
+    assert info.model == "NVIDIA GeForce RTX 5090"
+    assert info.vram_total_mb == 32607
+    assert info.device_uuids == ["GPU-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"]
+
+
+def test_group_size_and_vram_tie_selects_lowest_index():
+    output = "\n".join(
+        [
+            NVIDIA_SMI_HEADER,
+            "0, GPU-ffffffff-ffff-ffff-ffff-ffffffffffff, NVIDIA A10, 3 %, 512 MiB, 23028 MiB",
+            "1, GPU-99999999-9999-9999-9999-999999999999, NVIDIA A10G, 7 %, 1024 MiB, 23028 MiB",
+        ]
+    )
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(output))
+    assert info.model == "NVIDIA A10"
+    assert info.device_uuids == ["GPU-ffffffff-ffff-ffff-ffff-ffffffffffff"]
+
 
 async def test_gpu_info():
     gpu_info = await utils.get_gpu_info()

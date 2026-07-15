@@ -12,6 +12,10 @@ Comments must describe final behavior only. Do not add comments that explain cha
 
 Do not add defensive fallback logic unless its purpose is explicit, requirement-backed, and tied to a concrete failure mode.
 
+### Submodules
+
+Do not modify files inside the submodule checkouts of this repository (`crynux-worker`, `gpt-task`, `stable-diffusion-task`). Changes to submodule code MUST be made in the standalone repository of that project, and brought into this repository only by updating the submodule pointer.
+
 ### WebUI
 
 For WebUI-specific coding requirements, use `src/webui/AGENTS.md` as the source of truth.

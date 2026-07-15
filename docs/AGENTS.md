@@ -7,6 +7,7 @@
 - `node-slashed.md`: How the node handles a relay `NodeSlashed` event: the local `slashed` state, status synchronization, WebUI behavior, restart and manual start after slash, and task and worker behavior.
 - `model_predownload.md`: How the node handles relay `DownloadModel` events: the download task lifecycle and state machine, retry and backoff policy, re-trigger behavior, and persistence and recovery.
 - `runner-dynamic-update.md`: How the runner version is determined and dynamically updated: the worker patch update loop, which files are patched, and how the updated version is reported to the WebUI.
+- `multi-gpu.md`: How the node supports multiple GPUs: the layer-sharding execution model, the identical-model group selection rule, aggregated `<N>x <model>` reporting with summed VRAM, worker isolation via `CUDA_VISIBLE_DEVICES` UUID injection, and the determinism constraints including the CPU/disk offload prohibition.
 
 ## Doc Update Requirements
 

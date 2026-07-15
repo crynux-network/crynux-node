@@ -12,6 +12,7 @@ from anyio import Condition, Lock, fail_after, sleep
 
 from crynux_server.config import Config, get_config, load_env_file
 from crynux_server.models import TaskInput, TaskResult
+from crynux_server.utils import get_selected_gpu_device_uuids
 
 from .error import (TaskDownloadError, TaskExecutionError, TaskInvalid,
                     is_task_invalid)
@@ -138,6 +139,22 @@ class WorkerManager(object):
 
         log_config = {"dir": self.config.log.dir, "level": self.config.log.level}
         envs["cw_log"] = json.dumps(log_config)
+
+        # Pin the worker to the selected identical-model GPU group so the set
+        # of cards the worker executes on matches the GPU info reported to the
+        # relay. UUIDs are used because nvidia-smi (PCI bus order) and CUDA
+        # (fastest-first order) may number devices differently.
+        try:
+            device_uuids = get_selected_gpu_device_uuids()
+        except (OSError, subprocess.CalledProcessError) as e:
+            _logger.warning(
+                "Failed to enumerate GPUs for worker device pinning, "
+                "the worker will see all GPUs: %s",
+                e,
+            )
+            device_uuids = []
+        if len(device_uuids) > 0:
+            envs["CUDA_VISIBLE_DEVICES"] = ",".join(device_uuids)
 
         worker_envs = load_env_file("WORKER_")
         envs.update(worker_envs)

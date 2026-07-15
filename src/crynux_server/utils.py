@@ -1,8 +1,9 @@
 import os.path
 import platform
 import re
+import subprocess
 from collections import OrderedDict
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import psutil
 from anyio import run_process, to_thread
@@ -15,7 +16,12 @@ __all__ = [
     "get_os",
     "get_task_hash",
     "GpuInfo",
+    "NvidiaGpuCard",
+    "parse_nvidia_smi_gpus",
+    "select_gpu_cards",
+    "aggregate_gpu_info",
     "get_gpu_info",
+    "get_selected_gpu_device_uuids",
     "CpuInfo",
     "get_cpu_info",
     "MemoryInfo",
@@ -111,34 +117,91 @@ class GpuInfo(BaseModel):
     model: str = ""
     vram_used_mb: int = 0
     vram_total_mb: int = 0
+    device_uuids: List[str] = []
+
+
+class NvidiaGpuCard(BaseModel):
+    index: int
+    uuid: str
+    name: str
+    usage: int = 0
+    vram_used_mb: int = 0
+    vram_total_mb: int = 0
+
+
+_NVIDIA_SMI_GPU_QUERY_CMD = (
+    "nvidia-smi --query-gpu=index,uuid,name,utilization.gpu,memory.used,memory.total"
+    " --format=csv"
+)
+
+
+def parse_nvidia_smi_gpus(output: str) -> List[NvidiaGpuCard]:
+    number_pattern = re.compile(r"(\d+)")
+
+    def parse_number(field: str) -> int:
+        m = number_pattern.search(field)
+        return int(m.group(1)) if m is not None else 0
+
+    cards: List[NvidiaGpuCard] = []
+    for line in output.strip().splitlines()[1:]:
+        line = line.strip()
+        if len(line) == 0:
+            continue
+        fields = [field.strip() for field in line.split(",")]
+        assert len(fields) == 6
+        cards.append(
+            NvidiaGpuCard(
+                index=int(fields[0]),
+                uuid=fields[1],
+                name=fields[2],
+                usage=parse_number(fields[3]),
+                vram_used_mb=parse_number(fields[4]),
+                vram_total_mb=parse_number(fields[5]),
+            )
+        )
+    return cards
+
+
+def select_gpu_cards(cards: List[NvidiaGpuCard]) -> List[NvidiaGpuCard]:
+    """Select the largest identical-model group of GPU cards.
+
+    Ties are broken by larger per-card VRAM, then by the group containing
+    the lowest card index.
+    """
+    assert len(cards) > 0
+
+    groups: Dict[str, List[NvidiaGpuCard]] = OrderedDict()
+    for card in cards:
+        groups.setdefault(card.name, []).append(card)
+
+    def group_key(group: List[NvidiaGpuCard]):
+        return (
+            len(group),
+            max(card.vram_total_mb for card in group),
+            -min(card.index for card in group),
+        )
+
+    return max(groups.values(), key=group_key)
+
+
+def aggregate_gpu_info(cards: List[NvidiaGpuCard]) -> GpuInfo:
+    selected = select_gpu_cards(cards)
+    name = selected[0].name
+    model = name if len(selected) == 1 else f"{len(selected)}x {name}"
+    return GpuInfo(
+        usage=max(card.usage for card in selected),
+        model=model,
+        vram_used_mb=sum(card.vram_used_mb for card in selected),
+        vram_total_mb=sum(card.vram_total_mb for card in selected),
+        device_uuids=[card.uuid for card in selected],
+    )
 
 
 async def _get_nvidia_gpu_info() -> GpuInfo:
-    res = await run_process(
-        "nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv"
-    )
+    res = await run_process(_NVIDIA_SMI_GPU_QUERY_CMD)
     output = res.stdout.decode()
-    result_line = output.split("\n")[1].strip()
-    results = result_line.split(",")
-    assert len(results) == 4
-
-    info = GpuInfo()
-
-    p = re.compile(r"(\d+)")
-
-    info.model = results[0].strip()
-
-    m = p.search(results[1])
-    if m is not None:
-        info.usage = int(m.group(1))
-    m = p.search(results[2])
-    if m is not None:
-        info.vram_used_mb = int(m.group(1))
-    m = p.search(results[3])
-    if m is not None:
-        info.vram_total_mb = int(m.group(1))
-
-    return info
+    cards = parse_nvidia_smi_gpus(output)
+    return aggregate_gpu_info(cards)
 
 
 async def _get_osx_gpu_info() -> GpuInfo:
@@ -161,6 +224,20 @@ async def get_gpu_info() -> GpuInfo:
         return await _get_osx_gpu_info()
     else:
         return await _get_nvidia_gpu_info()
+
+
+def get_selected_gpu_device_uuids() -> List[str]:
+    """Synchronously enumerate NVIDIA GPUs and return the device UUIDs of the
+    selected identical-model group. Returns an empty list on macOS, where GPU
+    selection does not apply."""
+    if get_os() == "Darwin":
+        return []
+    res = subprocess.run(
+        _NVIDIA_SMI_GPU_QUERY_CMD, shell=True, capture_output=True, check=True
+    )
+    output = res.stdout.decode()
+    cards = parse_nvidia_smi_gpus(output)
+    return aggregate_gpu_info(cards).device_uuids
 
 
 class CpuInfo(BaseModel):
