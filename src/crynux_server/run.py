@@ -73,8 +73,14 @@ class CrynuxRunner(object):
             await db.init(self.config.db)
             _logger.info("DB init completed.")
 
-            worker_manager = WorkerManager(self.config)
-            set_worker_manager(worker_manager)
+            inference_worker_manager = WorkerManager(
+                role="inference", config=self.config
+            )
+            set_worker_manager(inference_worker_manager)
+            download_worker_manager = WorkerManager(
+                role="download", config=self.config
+            )
+            set_worker_manager(download_worker_manager)
 
             _logger.info(f"Serving WebUI from: {os.path.abspath(self.config.web_dist)}")
             self._server = Server(

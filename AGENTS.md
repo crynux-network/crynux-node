@@ -26,4 +26,6 @@ Follow a root-cause-first bugfix protocol: analyze the code path, form a clear h
 
 ## E2E Test
 
+Do not run E2E tests on your own after modifying code unless the user explicitly requests it.
+
 For E2E test execution instructions, use `tests/e2e/AGENTS.md` as the source of truth.

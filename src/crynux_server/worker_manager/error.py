@@ -28,5 +28,9 @@ class TaskDownloadError(TaskError):
 
 
 def is_task_invalid(stdout: str) -> bool:
-    pattern = re.compile(r"Task args invalid|Task model invalid")
+    pattern = re.compile(r"Task args invalid")
     return pattern.search(stdout) is not None
+
+
+def is_model_not_downloaded(stdout: str) -> bool:
+    return "Task model not downloaded" in stdout

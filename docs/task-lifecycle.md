@@ -6,8 +6,10 @@ This document specifies the business-level lifecycle of an inference task on the
 
 Task execution failures are classified into exactly two categories:
 
-- **`TaskInvalid`**: the task itself is at fault. Every node executing this task fails the same way. This classification is derived from the worker error traceback and covers invalid task arguments and invalid model identifiers only.
-- **`TaskExecutionError`**: every other failure, including CUDA errors, out-of-memory errors, model download failures, and any unclassified exception. Responsibility cannot be attributed to the task, so it is treated as a node-local failure of unknown cause.
+- **`TaskInvalid`**: the task itself is at fault. Every node executing this task fails the same way. This classification is derived from the worker error traceback and covers invalid task arguments only.
+- **`TaskExecutionError`**: every other failure, including CUDA errors, out-of-memory errors, missing models, and any unclassified exception. Responsibility cannot be attributed to the task, so it is treated as a node-local failure of unknown cause.
+
+The inference worker loads models from the local cache only (`local_files_only`), so it cannot distinguish an invalid model identifier from a model that has not been downloaded yet: both are a local cache miss and fail with the `Task model not downloaded` error. The node therefore does not report `TaskInvalid` for invalid model identifiers; such tasks fail as `TaskExecutionError` and end through the relay timeout, the always-safe silent path. The `Task model not downloaded` traceback additionally suppresses the inference worker restart, as specified in `docs/task-system-design.md`; its protocol handling is identical to every other `TaskExecutionError`.
 
 The classification boundary is protocol-critical because of validation groups:
 

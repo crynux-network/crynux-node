@@ -4,9 +4,7 @@ from anyio import create_task_group, fail_after
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from crynux_server.models import TaskResult
-from crynux_server.worker_manager import WorkerManager
-
-from ..depends import WorkerManagerDep
+from crynux_server.worker_manager import WorkerManager, get_worker_manager
 
 _logger = logging.getLogger(__name__)
 
@@ -47,22 +45,24 @@ async def result_consumer(
 
 
 @router.websocket("/")
-async def worker(websocket: WebSocket, worker_manager: WorkerManagerDep):
+async def worker(websocket: WebSocket):
     await websocket.accept()
     version_msg = await websocket.receive_json()
     version = version_msg["version"]
+    role = version_msg.get("role", "inference")
+    worker_manager = get_worker_manager(role)
     worker_id = await worker_manager.connect(version)
     await websocket.send_json({"worker_id": worker_id})
-    _logger.info(f"worker {worker_id} connects")
+    _logger.info(f"{role} worker {worker_id} connects")
     try:
         async with create_task_group() as tg:
             tg.start_soon(task_producer, worker_id, websocket, worker_manager)
             tg.start_soon(result_consumer, worker_id, websocket, worker_manager)
     except WebSocketDisconnect:
-        _logger.error(f"worker {worker_id} disconnects")
+        _logger.error(f"{role} worker {worker_id} disconnects")
         pass
     except Exception as e:
-        _logger.error(f"worker {worker_id} unexpected error")
+        _logger.error(f"{role} worker {worker_id} unexpected error")
         _logger.exception(e)
         raise
     finally:

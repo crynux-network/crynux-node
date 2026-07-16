@@ -184,6 +184,7 @@ class NodeManager(object):
         watcher: Optional[EventWatcher] = None,
         task_system: Optional[TaskSystem] = None,
         worker_manager: Optional[WorkerManager] = None,
+        download_worker_manager: Optional[WorkerManager] = None,
         retry: bool = True,
         retry_delay: float = 30,
     ) -> None:
@@ -213,8 +214,11 @@ class NodeManager(object):
         self._watcher = watcher
         self._task_system = task_system
         if worker_manager is None:
-            worker_manager = get_worker_manager()
+            worker_manager = get_worker_manager("inference")
         self._worker_manager = worker_manager
+        if download_worker_manager is None:
+            download_worker_manager = get_worker_manager("download")
+        self._download_worker_manager = download_worker_manager
 
         self._retry = retry
         self._retry_delay = retry_delay
@@ -284,9 +288,32 @@ class NodeManager(object):
     async def _prefetch_models(self):
         preload_models = self.config.task_config.preloaded_models
         task_inputs = []
+
+        # The initial inference task model must always be present locally:
+        # the inference worker loads models from the local cache only and
+        # cannot download it on the fly
+        initial_task_model = models.ModelConfig(
+            id="crynux-network/stable-diffusion-v1-5", type="base", variant="fp16"
+        )
+        task_inputs.append(
+            models.TaskInput(
+                task=models.DownloadTaskInput(
+                    task_name="download",
+                    task_type=models.TaskType.SD,
+                    task_id="preload_models_0",
+                    model=initial_task_model,
+                )
+            )
+        )
+
         if preload_models is not None:
             if preload_models.sd_base is not None:
                 for model in preload_models.sd_base:
+                    if (
+                        model.id == initial_task_model.id
+                        and model.variant == initial_task_model.variant
+                    ):
+                        continue
                     task_input = models.TaskInput(
                         task=models.DownloadTaskInput(
                             task_name="download",
@@ -339,7 +366,7 @@ class NodeManager(object):
                     task_inputs.append(task_input)
 
         for i, task_input in enumerate(task_inputs):
-            task_fut = await self._worker_manager.send_task(task_input)
+            task_fut = await self._download_worker_manager.send_task(task_input)
             try:
                 msg = f"Downloading models............ ({i+1}/{len(task_inputs)})"
                 _logger.info(msg)
@@ -655,6 +682,11 @@ class NodeManager(object):
                         assert len(version_list) == 3
                         # update version
                         await self._relay.node_update_version(version)
+                        # The download worker has no patch loop of its own:
+                        # restart it so both workers run the same code
+                        await self._download_worker_manager.restart(
+                            reason=f"inference worker updated to version {version}"
+                        )
                     current_version = version
 
         async for attemp in AsyncRetrying(
@@ -693,7 +725,19 @@ class NodeManager(object):
                         version_list = [int(v) for v in version.split(".")]
                         assert len(version_list) == 3
                 except TimeoutError:
-                    raise ValueError("Worker is not connected within 120 seconds")
+                    raise ValueError(
+                        "Inference worker is not connected within 120 seconds"
+                    )
+
+                try:
+                    async with self._download_worker_manager.wait_connected(
+                        timeout=120
+                    ):
+                        pass
+                except TimeoutError:
+                    raise ValueError(
+                        "Download worker is not connected within 120 seconds"
+                    )
 
                 try:
                     async with create_task_group() as init_tg:
@@ -773,7 +817,7 @@ class NodeManager(object):
         assert self._tg is None, "Node manager is running."
 
         try:
-            with self._worker_manager.start():
+            with self._worker_manager.start(), self._download_worker_manager.start():
                 await self._run(prefetch=prefetch)
         except get_cancelled_exc_class():
             raise

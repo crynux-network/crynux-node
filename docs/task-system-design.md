@@ -34,13 +34,13 @@ Rules that keep the two domains separate:
 
 - **Relay (server side)**: the sole authority for ending timed-out tasks, and the sole dispatcher. Its timeout processor periodically scans all non-terminal tasks and sets every task whose `start_time + timeout` has passed to `EndAborted` with reason `Timeout`. The relay maintains one current-task pointer per node (`CurrentTaskIDCommitment`) and refuses to dispatch a new inference task while the pointer is set, so a node has at most one inference task at any time. The pointer is exposed through `GET /v1/node/:address/task`.
 - **Reconcile Loop** (`src/crynux_server/task/`): the single driver of all inference task behavior. One asyncio task that polls the node's current task every second and applies the condition-to-action rules in `docs/task-lifecycle.md`. It MUST contain any exception escaping a cycle: a cycle failure MUST NOT terminate the loop.
-- **Worker Manager** (`src/crynux_server/worker_manager/`): owns the worker process. It converts worker error results into typed exceptions (`TaskInvalid`, `TaskExecutionError`) and restarts the worker process on its own authority, based only on task execution outcomes it observes directly. It MUST NOT perform any relay operation.
+- **Worker Manager** (`src/crynux_server/worker_manager/`): owns the worker processes. Two instances exist, one per worker role. The inference manager owns the full worker health policy: it converts worker error results into typed exceptions (`TaskInvalid`, `TaskExecutionError`) and restarts the inference worker process on its own authority, based only on task execution outcomes it observes directly. The download manager runs the download worker process without any watchdog and never restarts it on task results, so an in-flight model download is never aborted by health handling. Each worker connects with its role in the websocket handshake and is routed to the matching manager; inference tasks are dispatched to the inference manager, download tasks to the download manager. Neither manager performs any relay operation.
 - **Relay HTTP client** (`src/crynux_server/relay/web_impl.py`): a thin transport layer. Every request is a single attempt; transport errors and all HTTP error responses propagate to the caller unchanged. It contains no retry, backoff, or error-resolution logic.
 - **Event Watcher** (`src/crynux_server/watcher/watcher.py`): polls the relay event stream and dispatches `DownloadModel` events (the only channel for model download commands) and node status display events. It plays no role in inference task handling.
 - **Node Manager** (`src/crynux_server/node_manager/`): wires components together and synchronizes node status for display.
-- **Worker Process** (`crynux-worker`): a supervisor process with two child processes. The inference child executes inference tasks sequentially in a single CUDA context. The download child downloads models and uses no GPU. The two children run in parallel and coordinate through a per-model mutex, so a model file is never read by an inference while it is being written by a download. Each child reports success or an error traceback per task and keeps running after task failures.
+- **Worker Processes** (`crynux-worker`): two independent worker processes, each a supervisor with a single child process selected by the required `worker_role` config (`inference` or `download`). The inference worker executes inference tasks sequentially in a single CUDA context and never downloads models: all model loads run with `local_files_only`, and a model absent from the local cache fails the task with the `Task model not downloaded` error. The download worker downloads models serially and uses no GPU. The two workers do not coordinate through any lock: the Hugging Face cache writes files atomically (download to a temporary file, then move), so the inference worker never observes a half-written model file; a partially present snapshot fails the `local_files_only` load and converges once the download completes. Each child reports success or an error traceback per task and keeps running after task failures.
 
-The diagram shows the component topology. Three OS processes exist: the relay server, the node process (`crynux_server`, a Python asyncio program in which every component below runs as an object or asyncio task inside one event loop), and the worker process with its two children.
+The diagram shows the component topology. Four OS processes exist: the relay server, the node process (`crynux_server`, a Python asyncio program in which every component below runs as an object or asyncio task inside one event loop), the inference worker process, and the download worker process.
 
 ```mermaid
 flowchart LR
@@ -53,13 +53,17 @@ flowchart LR
         DownloadRunner["Download task execution<br/>(asyncio task per download, 3 attempts)"]
         EventWatcher["Event Watcher<br/>(asyncio task, 1s event poll)"]
         NodeManager["Node Manager<br/>(wiring + node status poll)"]
-        WorkerManager["Worker Manager<br/>(object + watchdog asyncio task)"]
+        InfManager["Worker Manager (inference)<br/>(watchdog + restart policy)"]
+        DlManager["Worker Manager (download)<br/>(no watchdog, no restart)"]
         RelayClient["Relay HTTP client<br/>(single-attempt transport)"]
     end
 
-    subgraph worker_proc["Worker process: crynux-worker (local child process)"]
-        InferenceChild["Inference child process<br/>(one CUDA context, serial)"]
-        DownloadChild["Download child process<br/>(no GPU)"]
+    subgraph inf_proc["Inference worker process: crynux-worker"]
+        InferenceChild["Inference child process<br/>(one CUDA context, serial,<br/>local_files_only)"]
+    end
+
+    subgraph dl_proc["Download worker process: crynux-worker"]
+        DownloadChild["Download child process<br/>(no GPU, serial)"]
     end
 
     Reconciler -- "current-task poll (1s), task status,<br/>report error, submit score, upload result" --> RelayClient
@@ -69,12 +73,13 @@ flowchart LR
     NodeManager -- "node info poll (5s)" --> RelayClient
     RelayClient -- "HTTP, single attempt" --> Relay
 
-    Reconciler -- "dispatch inference task<br/>+ execution deadline" --> WorkerManager
-    DownloadRunner -- "dispatch download task" --> WorkerManager
-    WorkerManager -- "typed result futures" --> Reconciler
-    WorkerManager -- "inference queue /<br/>restart on failure or hang" --> InferenceChild
-    WorkerManager -- "download queue" --> DownloadChild
-    InferenceChild <-. "per-model mutex" .-> DownloadChild
+    Reconciler -- "dispatch inference task<br/>+ execution deadline" --> InfManager
+    DownloadRunner -- "dispatch download task" --> DlManager
+    InfManager -- "typed result futures" --> Reconciler
+    InfManager -- "inference queue /<br/>restart on failure or hang" --> InferenceChild
+    DlManager -- "download queue" --> DownloadChild
+    InferenceChild -. "reads model cache<br/>(local_files_only)" .- Cache[("model cache")]
+    DownloadChild -- "atomic writes" --> Cache
 ```
 
 ## 3) The Reconcile Loop
@@ -99,13 +104,15 @@ Rules:
 
 The inference child shares one CUDA context across all inference tasks. A failure in one task can permanently poison this context (for example, a sticky CUDA device-side assert), causing every subsequent task to fail until the process is restarted. A hung worker has the same effect through a different symptom.
 
-The worker manager monitors worker health on its own authority, using only information it observes directly. The restart decision does not depend on relay events, relay task statuses, or the reconcile loop.
+The health policy in this section applies to the inference worker process only, and it is owned by the inference worker manager. The download worker manager has no watchdog and never restarts the download worker on task results; the download worker is restarted only by the node itself, for the version synchronization specified in `docs/runner-dynamic-update.md`.
 
-- When an inference task result resolves to `TaskExecutionError`, the worker manager MUST restart the worker process immediately. The relay does not dispatch a new task to the node until the current task ends, so the restart happens in a quiet window.
-- Every inference task dispatched to the worker carries an execution deadline of the task timeout plus 10 seconds. When a dispatched task has produced no worker-reported result by its deadline, the worker manager MUST restart the worker process. This deadline is the only bound on the reconcile loop's execute wait: by the time it fires, the relay's own timeout processor has already aborted the task, so the cycle that resumes after the cancellation observes a terminal status and closes the task.
+The inference worker manager monitors worker health on its own authority, using only information it observes directly. The restart decision does not depend on relay events, relay task statuses, or the reconcile loop.
+
+- When an inference task result resolves to `TaskExecutionError`, the worker manager MUST restart the inference worker process immediately, with one exception: an error result whose traceback contains `Task model not downloaded` MUST NOT trigger a restart. That failure means a required model is absent from the local cache; the worker and its CUDA context are healthy, and restarting them while the model downloads is pure waste. The relay does not dispatch a new task to the node until the current task ends, so a restart happens in a quiet window.
+- Every inference task dispatched to the worker carries an execution deadline of the task timeout plus 10 seconds. When a dispatched task has produced no worker-reported result by its deadline, the worker manager MUST restart the inference worker process. This deadline is the only bound on the reconcile loop's execute wait: by the time it fires, the relay's own timeout processor has already aborted the task, so the cycle that resumes after the cancellation observes a terminal status and closes the task.
 - The watchdog judges completion by results the worker actually reports (success or error), never by the local task future state. A task future cancelled from the caller side does not count as a result; the watchdog entry is cleared only by a worker-reported result or by a worker restart.
-- The worker MUST NOT be restarted for `TaskInvalid` results (the task is at fault, the worker is healthy), for successful results, or for tasks that were never dispatched to the worker.
-- A worker restart cancels all in-flight and queued task futures of both children. An inference task whose execution is cancelled this way ends through the `TaskCancelled` path specified in `docs/task-lifecycle.md`; a cancelled execution MUST NOT trigger another worker restart. A download task cancelled this way is recovered by the download path's own retries (section 5).
+- The worker MUST NOT be restarted for `TaskInvalid` results (the task is at fault, the worker is healthy), for `Task model not downloaded` results, for successful results, or for tasks that were never dispatched to the worker.
+- An inference worker restart cancels the in-flight and queued task futures of the inference manager only; download tasks are unaffected. An inference task whose execution is cancelled this way ends through the `TaskCancelled` path specified in `docs/task-lifecycle.md`; a cancelled execution MUST NOT trigger another worker restart.
 
 The two failure modes map to the two triggers:
 
@@ -117,19 +124,20 @@ flowchart TD
     dispatched[Inference task dispatched to worker with deadline] --> result{Observed outcome}
     result -->|valid result| keep[Keep worker]
     result -->|TaskInvalid result| keep
-    result -->|TaskExecutionError result| restart[Restart worker process]
+    result -->|Task model not downloaded result| keep
+    result -->|other TaskExecutionError result| restart[Restart inference worker process]
     result -->|no result by deadline| restart
 ```
 
-Worker health state is process-local. A node restart replaces the worker process, so nothing persists across restarts.
+Worker health state is process-local. A node restart replaces both worker processes, so nothing persists across restarts.
 
 ## 5) Model Download Tasks
 
 Model download commands are relay-emitted `DownloadModel` events, not relay task records: they have no relay-side status, no timeout, and do not occupy the node's current-task pointer. The relay emits them to the assigned node when a started task requires a model the node lacks, and to idle nodes to spread under-replicated models. A download can therefore run while an inference task is active.
 
-- Each `DownloadModel` event creates one local download task, executed through the worker manager on the worker's download child process. Downloads run in parallel with inference execution and never queue behind it; the per-model mutex is the only synchronization point between the two children.
+- Each `DownloadModel` event creates one local download task, executed through the download worker manager on the download worker process. Downloads run in parallel with inference execution and never queue behind it. There is no lock between the two workers: the download worker is serial by itself, and the model cache's atomic writes guarantee the inference worker never reads a half-written model file.
 - A download task is attempted up to 3 times with backoff; after exhaustion it is marked failed locally. On success the node reports the model as downloaded to the relay.
-- A worker restart triggered by inference health cancels an in-flight download; the download's own retry covers this.
+- Inference worker restarts never cancel a download: the download worker runs in its own process under its own manager, has no execution deadline, and MAY take unbounded time to finish a download. The only events that interrupt an in-flight download are a node shutdown and the node-issued download worker restart after a runner version change; the download's own retry covers the latter.
 - Download commands emitted while the node is offline are lost with the rest of the event stream. This is accepted: downloads are a best-effort locality optimization.
 
 ## 6) State Consistency with the Relay

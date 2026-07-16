@@ -1,10 +1,13 @@
 from .error import (TaskDownloadError, TaskCancelled, TaskError,
-                    TaskExecutionError, TaskInvalid, is_task_invalid)
-from .manager import WorkerManager, get_worker_manager, set_worker_manager
+                    TaskExecutionError, TaskInvalid, is_model_not_downloaded,
+                    is_task_invalid)
+from .manager import (WorkerManager, WorkerRole, get_worker_manager,
+                      set_worker_manager)
 from .task import TaskFuture
 
 __all__ = [
     "WorkerManager",
+    "WorkerRole",
     "get_worker_manager",
     "set_worker_manager",
     "TaskFuture",
@@ -14,4 +17,5 @@ __all__ = [
     "TaskDownloadError",
     "TaskError",
     "is_task_invalid",
+    "is_model_not_downloaded",
 ]

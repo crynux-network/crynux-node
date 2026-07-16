@@ -10,14 +10,16 @@ The final source of truth is the worker package version string:
 
 Version flow is:
 
-1. `crynux_worker_process.py` reads version from `crynux_worker.version()` (which returns `__version__`).
+1. The inference worker launcher (`crynux_worker_process.py`) reads version from `crynux_worker.version()` (which returns `__version__`).
 2. If patches are found, patch files are applied to local worker runtime files. These patches can update `crynux_worker/__init__.py`, including `__version__`.
-3. After patch apply, `crynux_worker_process.py` restarts the inner worker process.
-4. The restarted worker connects to server WebSocket `/manager/v1/worker/` and sends `{"version": "x.y.z"}` in the first message.
-5. Server sets this value into in-memory `worker_manager.version`.
-6. WebUI `GET /node/runner/version` reads `worker_manager.version` and displays it.
+3. After patch apply, the launcher restarts the inner worker process.
+4. The restarted worker connects to server WebSocket `/manager/v1/worker/` and sends `{"version": "x.y.z", "role": "inference"}` in the first message.
+5. Server sets this value into the in-memory `version` of the inference worker manager.
+6. WebUI `GET /node/runner/version` reads the inference worker manager's `version` and displays it.
 
-So the version is not persisted in node manager state. It is reported by the currently running worker process after restart.
+So the version is not persisted in node manager state. It is reported by the currently running inference worker process after restart.
+
+When the node observes that the inference worker reconnected with a new version, it reports the new version to the relay and restarts the download worker process, so both workers run the same patched code. The download worker loads the already-patched `script_dir` at startup; it performs no patching of its own.
 
 ## 2) What component performs dynamic update
 
@@ -25,10 +27,13 @@ Dynamic update is implemented by the worker process launcher:
 
 - `crynux-worker/crynux_worker_process.py`
 
-The node starts this process from `src/crynux_server/worker_manager/manager.py`, passing:
+The node starts one launcher process per worker role (inference and download) from `src/crynux_server/worker_manager/manager.py`, passing:
 
 - `CRYNUX_WORKER_PATCH_URL` (from `task_config.worker_patch_url`)
+- `cw_worker_role` (the role of the worker process)
 - runtime directories and node/relay URLs
+
+The patch update loop runs only in the inference worker launcher, so two processes never patch the same `script_dir` concurrently. The download worker launcher never checks for patches.
 
 Default patch source (from `config/config.yml`) is:
 

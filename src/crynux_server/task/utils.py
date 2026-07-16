@@ -32,7 +32,7 @@ async def run_inference_task(
     task_dir: str,
     deadline: Optional[float] = None,
 ):
-    worker_manager = get_worker_manager()
+    worker_manager = get_worker_manager("inference")
     task_input = TaskInput(
         task=InferenceTaskInput(
             task_name="inference",
@@ -82,7 +82,7 @@ async def run_download_task(
     task_type: TaskType,
     model: ModelConfig,
 ):
-    worker_manager = get_worker_manager()
+    worker_manager = get_worker_manager("download")
     task_input = TaskInput(
         task=DownloadTaskInput(
             task_name="download",

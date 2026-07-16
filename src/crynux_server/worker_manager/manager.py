@@ -5,7 +5,7 @@ import os
 import subprocess
 import time
 from contextlib import asynccontextmanager, contextmanager, suppress
-from typing import Dict, Optional, Set
+from typing import Dict, Literal, Optional, Set
 
 import psutil
 from anyio import Condition, Lock, fail_after, sleep
@@ -15,7 +15,7 @@ from crynux_server.models import TaskInput, TaskResult
 from crynux_server.utils import get_selected_gpu_device_uuids
 
 from .error import (TaskDownloadError, TaskExecutionError, TaskInvalid,
-                    is_task_invalid)
+                    is_model_not_downloaded, is_task_invalid)
 from .exchange import TaskExchange
 from .task import TaskFuture
 from .utils import get_exe_head
@@ -24,12 +24,30 @@ _logger = logging.getLogger(__name__)
 
 WATCHDOG_CHECK_INTERVAL = 1
 
+WorkerRole = Literal["inference", "download"]
 
+
+def _derive_role_pid_file(worker_pid_file: str, role: WorkerRole) -> str:
+    if role == "inference":
+        return worker_pid_file
+    base, ext = os.path.splitext(worker_pid_file)
+    return f"{base}_download{ext}"
+
+
+# Manages one worker process of a single role.
+#
+# The inference manager owns the full health policy: the execution deadline
+# watchdog and the restart on execution errors. The download manager never
+# restarts its worker on task results or deadlines, so an in-flight model
+# download is never aborted by inference health handling.
 class WorkerManager(object):
-    def __init__(self, config: Optional[Config] = None) -> None:
+    def __init__(
+        self, role: WorkerRole = "inference", config: Optional[Config] = None
+    ) -> None:
         if config is None:
             config = get_config()
         self.config = config
+        self.role: WorkerRole = role
 
         self._exchange = TaskExchange()
 
@@ -108,12 +126,15 @@ class WorkerManager(object):
             output_dir = ""
             worker_pid_file = "crynux_worker.pid"
 
+        worker_pid_file = _derive_role_pid_file(worker_pid_file, self.role)
+
         cw_worker_url = f"{self.config.relay_url}/v1/worker"
         args = get_exe_head(script_dir)
         envs = os.environ.copy()
         envs.update(
             {
                 "CRYNUX_WORKER_PATCH_URL": patch_url,
+                "cw_worker_role": self.role,
                 "cw_data_dir__models__huggingface": hf_cache_dir,
                 "cw_data_dir__models__external": external_cache_dir,
                 "cw_output_dir": output_dir,
@@ -137,7 +158,16 @@ class WorkerManager(object):
         node_url = f"ws://127.0.0.1:{self.config.server_port}/manager/v1/worker/"
         envs["cw_node_url"] = node_url
 
-        log_config = {"dir": self.config.log.dir, "level": self.config.log.level}
+        log_filename = (
+            "crynux-worker.log"
+            if self.role == "inference"
+            else "crynux-worker-download.log"
+        )
+        log_config = {
+            "dir": self.config.log.dir,
+            "level": self.config.log.level,
+            "filename": log_filename,
+        }
         envs["cw_log"] = json.dumps(log_config)
 
         # Pin the worker to the selected identical-model GPU group so the set
@@ -211,9 +241,11 @@ class WorkerManager(object):
     async def restart(self, reason: Optional[str] = None):
         async with self._restart_lock:
             if reason is None:
-                _logger.warning("Restarting worker process")
+                _logger.warning("Restarting %s worker process", self.role)
             else:
-                _logger.warning("Restarting worker process: %s", reason)
+                _logger.warning(
+                    "Restarting %s worker process: %s", self.role, reason
+                )
 
             self._stop_worker_process()
             await self._clear_worker_connection()
@@ -302,7 +334,9 @@ class WorkerManager(object):
             )
 
     async def send_task(self, input: TaskInput, deadline: Optional[float] = None):
-        if deadline is not None:
+        # The execution deadline watchdog is part of the inference health
+        # policy; the download worker may take unbounded time
+        if deadline is not None and self.role == "inference":
             self._task_deadlines[input.task.task_id] = deadline
             self._ensure_watchdog_running()
         return await self._exchange.send_task(input)
@@ -353,25 +387,28 @@ class WorkerManager(object):
             if fut.done():
                 del self._task_futures[task_id_commitment]
 
+        # Restart policy applies to the inference worker only. A model
+        # not downloaded failure does not indicate an unhealthy worker, so
+        # it never triggers a restart
         if (
-            result.task_name == "inference"
+            self.role == "inference"
+            and result.task_name == "inference"
             and result.result.status == "error"
             and not is_task_invalid(result.result.traceback)
+            and not is_model_not_downloaded(result.result.traceback)
         ):
             self._spawn_restart(
                 reason=f"task {task_id_commitment} failed with an execution error"
             )
 
-_default_worker_manager: Optional[WorkerManager] = None
+_default_worker_managers: Dict[WorkerRole, WorkerManager] = {}
 
 
-def get_worker_manager():
-    assert _default_worker_manager is not None
+def get_worker_manager(role: WorkerRole = "inference"):
+    assert role in _default_worker_managers
 
-    return _default_worker_manager
+    return _default_worker_managers[role]
 
 
 def set_worker_manager(worker_manager: WorkerManager):
-    global _default_worker_manager
-
-    _default_worker_manager = worker_manager
+    _default_worker_managers[worker_manager.role] = worker_manager
