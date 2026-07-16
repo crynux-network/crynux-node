@@ -7,13 +7,15 @@ from typing import Dict, List, Literal, Optional
 
 from anyio import fail_after, get_cancelled_exc_class, sleep, to_thread
 from hexbytes import HexBytes
+from pydantic import ValidationError
 
 from crynux_server import models
 from crynux_server.config import Config, get_config
 from crynux_server.relay import Relay, get_relay
 from crynux_server.relay.exceptions import RelayError
-from crynux_server.worker_manager import (TaskCancelled, TaskExecutionError,
-                                          TaskInvalid)
+from crynux_server.worker_manager import (TaskCancelled, TaskDownloadError,
+                                          TaskExecutionError, TaskInvalid,
+                                          get_worker_manager)
 
 from .state_cache import (InferenceTaskStateCache,
                           get_inference_task_state_cache)
@@ -282,6 +284,11 @@ class TaskReconciler(object):
         task.task_args = models.normalize_task_args_model_names(
             task.task_args, state.task_type
         )
+        await self._download_auxiliary_models(
+            task_id_hex=HexBytes(task_id).hex(),
+            task=task,
+            deadline=self._task_deadline(task),
+        )
 
         if state.task_type == models.TaskType.SD_FT_LORA:
             args = json.loads(task.task_args)
@@ -307,6 +314,43 @@ class TaskReconciler(object):
             deadline=deadline,
         )
         return files, b"".join(hashes), checkpoint
+
+    async def _download_auxiliary_models(
+        self, task_id_hex: str, task: models.RelayTask, deadline: float
+    ):
+        worker_manager = get_worker_manager("download")
+        try:
+            auxiliary_models = [
+                models.ModelConfig.from_model_id(model_id)
+                for model_id in task.model_ids
+                if not model_id.lower().startswith("base:")
+            ]
+        except (ValueError, ValidationError) as e:
+            raise TaskExecutionError(
+                f"Task {task_id_hex} has an invalid auxiliary model ID"
+            ) from e
+        for index, model in enumerate(auxiliary_models):
+            if time.time() >= deadline:
+                raise TaskExecutionError(
+                    f"Task {task_id_hex} auxiliary model download deadline expired"
+                )
+            task_input = models.TaskInput(
+                task=models.DownloadTaskInput(
+                    task_name="download",
+                    task_type=task.task_type,
+                    task_id=f"{task_id_hex}:aux:{index}",
+                    model=model,
+                )
+            )
+            task_result = await worker_manager.send_task(
+                task_input, deadline=deadline
+            )
+            try:
+                await task_result.get()
+            except (TaskCancelled, TaskDownloadError) as e:
+                raise TaskExecutionError(
+                    f"Task {task_id_hex} auxiliary model download failed"
+                ) from e
 
     async def _report_error(self, state: models.InferenceTaskState):
         task_id = bytes(state.task_id_commitment)

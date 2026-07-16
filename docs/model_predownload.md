@@ -1,24 +1,23 @@
 # Node Model Pre-download Flow
 
-This document specifies how `crynux-node` handles relay `DownloadModel` events.
+This document specifies how `crynux-node` handles background base-model pre-download requests delivered as relay `DownloadModel` events. Task-scoped downloads of non-base models are part of inference task execution and are specified in `docs/task-system-design.md` and `docs/task-lifecycle.md`.
 
 ## Overview
 
-`crynux-node` MUST process relay predownload requests through the node manager task system.
+`crynux-node` MUST process relay base-model pre-download requests through the node manager task system. This event-driven path MUST download base models only. It is a background locality optimization and MUST remain independent of any inference task.
 
 The flow has four stages:
 
 1. Receive a `DownloadModel` event from relay.
 2. Create a local download task keyed by `{node_address}_{model_id}`.
-3. Run model download and report completion to relay.
+3. Run the base-model download and report completion to relay.
 4. Persist final task state as `Success` or `Failed`.
 
-The node MUST apply exponential backoff retries for download failures and MUST stop retrying after 3 attempts.
+The node MUST apply exponential backoff retries for download failures and MUST stop retrying after 3 attempts. Background jobs MUST NOT carry an execution deadline and MAY remain queued or in progress while a foreground task-scoped download uses the same serial download worker.
 
 ## Trigger Point
 
-The event watcher in `NodeManager` MUST subscribe to relay `DownloadModel` events.  
-When an event for this node is received, `NodeManager` MUST call `TaskSystem.create_download_task(task_id, task_type, model_id)`.
+The event watcher in `NodeManager` MUST subscribe to relay `DownloadModel` events. Each event on this path MUST identify a base model. When an event for this node is received, `NodeManager` MUST call `TaskSystem.create_download_task(task_id, task_type, model_id)`.
 
 The task identifier format MUST be:
 
@@ -40,10 +39,14 @@ The task identifier format MUST be:
 ### Execution Rules
 
 1. If a task already exists in state `Success` or `Failed`, `DownloadTaskRunner.run()` MUST return immediately.
-2. In `Started`, the runner MUST execute `run_download_task(...)`.
+2. In `Started`, the runner MUST execute `run_download_task(...)` as a background job without a deadline.
 3. After local download succeeds, the runner MUST set state to `Executed`.
 4. In `Executed`, the runner MUST call `relay.node_report_model_downloaded(model_id)`.
 5. After reporting succeeds, the runner MUST set state to `Success` and MUST save the model into `download_model_cache`.
+
+The server MUST NOT inspect the Hugging Face cache before dispatching the job. The download worker MUST provide idempotent download behavior when the requested model is already present or partially downloaded.
+
+The download worker manager MUST NOT restart the worker when a background job fails. Background failure handling consists only of the retry and persisted-state rules in this document. A download worker restart caused by a foreground task-scoped deadline cancels an in-flight background job; that cancellation MUST enter the same bounded retry flow.
 
 ## Retry and Backoff Policy
 
@@ -73,11 +76,13 @@ On node restart, `TaskSystem._recover_download_task` MUST only recover tasks in:
 
 Tasks in `Success` or `Failed` MUST NOT be recovered for automatic execution.
 
+Only background base-model pre-download tasks use `download_task_states`, `download_model_cache`, relay completion reporting, and restart recovery. Foreground non-base-model downloads are task-scoped execution steps and MUST NOT create these persistent download-task records or report individual model completion to the relay.
+
 ## Relevant Source Files
 
 - `src/crynux_server/node_manager/node_manager.py`: subscribes to `DownloadModel` and creates download tasks
 - `src/crynux_server/task/task_system.py`: queueing, retries, backoff, and failed-state handling
-- `src/crynux_server/task/task_runner.py`: download runner state transitions and relay reporting
+- `src/crynux_server/task/download_task.py`: download runner state transitions and relay reporting
 - `src/crynux_server/models/task.py`: `DownloadTaskStatus` definition
 - `src/crynux_server/task/state_cache/db_impl.py`: persistent download task state storage
-- `src/crynux_server/server/v1/worker.py`: maps worker download errors to `TaskDownloadError`
+- `src/crynux_server/worker_manager/manager.py`: dispatches deadline-free background jobs and maps worker download errors to `TaskDownloadError`

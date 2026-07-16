@@ -1,15 +1,19 @@
+import time
 from collections import Counter
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Dict, Optional
 
 import httpx
+import pytest
 from anyio import create_task_group, sleep
 
 from crynux_server import models
 from crynux_server.relay.exceptions import RelayError
 from crynux_server.task import MemoryInferenceTaskStateCache, TaskReconciler
-from crynux_server.worker_manager import (TaskCancelled, TaskExecutionError,
-                                          TaskInvalid)
+from crynux_server.worker_manager import (TaskCancelled, TaskDownloadError,
+                                          TaskExecutionError, TaskInvalid)
+from crynux_server.task import reconciler as reconciler_module
 
 TASK_ID_1 = bytes([1] * 32)
 TASK_ID_2 = bytes([2] * 32)
@@ -139,6 +143,25 @@ class ScriptedReconciler(TaskReconciler):
         return self.worker_result
 
 
+class FakeDownloadResult:
+    def __init__(self, error=None):
+        self.error = error
+
+    async def get(self):
+        if self.error is not None:
+            raise self.error
+
+
+class FakeDownloadManager:
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
+
+    async def send_task(self, task_input, deadline=None):
+        self.calls.append((task_input, deadline))
+        return FakeDownloadResult(self.error)
+
+
 def make_reconciler(relay, worker_result=None, cache=None):
     if cache is None:
         cache = MemoryInferenceTaskStateCache()
@@ -220,6 +243,102 @@ async def test_execution_error_closes_task_silently():
     await cycle(reconciler)
     assert relay.calls["get_task"] == get_task_calls
     assert reconciler.execute_calls == 1
+
+
+async def test_auxiliary_models_download_before_inference(monkeypatch):
+    relay = FakeRelay()
+    reconciler = make_reconciler(relay)
+    manager = FakeDownloadManager()
+    monkeypatch.setattr(
+        reconciler_module, "get_worker_manager", lambda role: manager
+    )
+    task = make_relay_task(TASK_ID_1, models.InferenceTaskStatus.Started)
+    task.model_ids = [
+        "base:crynux-network/sdxl",
+        "lora:crynux-network/style",
+        "controlnet:lllyasviel/canny",
+    ]
+    deadline = task.start_time.timestamp() + task.timeout
+
+    await reconciler._download_auxiliary_models(
+        TASK_ID_1.hex(), task, deadline
+    )
+
+    assert len(manager.calls) == 2
+    assert [
+        call[0].task.model.type for call in manager.calls
+    ] == ["lora", "controlnet"]
+    assert all(call[1] == deadline for call in manager.calls)
+
+
+async def test_auxiliary_download_failure_skips_inference(monkeypatch, tmp_path):
+    relay = FakeRelay()
+    reconciler = TaskReconciler(
+        relay=relay,
+        state_cache=MemoryInferenceTaskStateCache(),
+        config=SimpleNamespace(
+            task_config=SimpleNamespace(output_dir=str(tmp_path))
+        ),
+    )
+    manager = FakeDownloadManager(TaskDownloadError("network error"))
+    monkeypatch.setattr(
+        reconciler_module, "get_worker_manager", lambda role: manager
+    )
+    inference_started = False
+
+    async def fake_run_inference_task(**kwargs):
+        nonlocal inference_started
+        inference_started = True
+
+    monkeypatch.setattr(
+        reconciler_module, "run_inference_task", fake_run_inference_task
+    )
+    task = make_relay_task(TASK_ID_1, models.InferenceTaskStatus.Started)
+    task.model_ids = ["base:crynux-network/sdxl", "lora:crynux-network/style"]
+    state = models.InferenceTaskState(
+        task_id_commitment=TASK_ID_1,
+        timeout=0,
+        status=models.InferenceTaskStatus.Started,
+        task_type=models.TaskType.SD,
+    )
+
+    with pytest.raises(TaskExecutionError):
+        await reconciler._run_task_on_worker(state, task, time.time() + 60)
+    assert not inference_started
+
+
+async def test_expired_auxiliary_download_deadline_skips_worker(monkeypatch):
+    relay = FakeRelay()
+    reconciler = make_reconciler(relay)
+    manager = FakeDownloadManager()
+    monkeypatch.setattr(
+        reconciler_module, "get_worker_manager", lambda role: manager
+    )
+    task = make_relay_task(TASK_ID_1, models.InferenceTaskStatus.Started)
+    task.model_ids = ["base:crynux-network/sdxl", "lora:crynux-network/style"]
+
+    with pytest.raises(TaskExecutionError):
+        await reconciler._download_auxiliary_models(
+            TASK_ID_1.hex(), task, time.time() - 1
+        )
+    assert manager.calls == []
+
+
+async def test_invalid_auxiliary_model_id_is_execution_error(monkeypatch):
+    relay = FakeRelay()
+    reconciler = make_reconciler(relay)
+    manager = FakeDownloadManager()
+    monkeypatch.setattr(
+        reconciler_module, "get_worker_manager", lambda role: manager
+    )
+    task = make_relay_task(TASK_ID_1, models.InferenceTaskStatus.Started)
+    task.model_ids = ["base:crynux-network/sdxl", "unsupported:model"]
+
+    with pytest.raises(TaskExecutionError):
+        await reconciler._download_auxiliary_models(
+            TASK_ID_1.hex(), task, time.time() + 60
+        )
+    assert manager.calls == []
 
 
 async def test_cancelled_execution_closes_task_silently():

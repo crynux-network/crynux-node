@@ -36,10 +36,9 @@ def _derive_role_pid_file(worker_pid_file: str, role: WorkerRole) -> str:
 
 # Manages one worker process of a single role.
 #
-# The inference manager owns the full health policy: the execution deadline
-# watchdog and the restart on execution errors. The download manager never
-# restarts its worker on task results or deadlines, so an in-flight model
-# download is never aborted by inference health handling.
+# The inference manager restarts on execution errors and missed deadlines.
+# The download manager uses deadlines only for foreground task-scoped
+# downloads; background model downloads remain unbounded.
 class WorkerManager(object):
     def __init__(
         self, role: WorkerRole = "inference", config: Optional[Config] = None
@@ -227,6 +226,7 @@ class WorkerManager(object):
             self._stop_worker_process()
 
     async def _clear_worker_connection(self):
+        await self._exchange.clear()
         for task_result in self._task_futures.values():
             if not task_result.done():
                 task_result.cancel()
@@ -334,9 +334,7 @@ class WorkerManager(object):
             )
 
     async def send_task(self, input: TaskInput, deadline: Optional[float] = None):
-        # The execution deadline watchdog is part of the inference health
-        # policy; the download worker may take unbounded time
-        if deadline is not None and self.role == "inference":
+        if deadline is not None:
             self._task_deadlines[input.task.task_id] = deadline
             self._ensure_watchdog_running()
         return await self._exchange.send_task(input)

@@ -25,3 +25,10 @@ class TaskExchange(object):
             while len(self._task_queue) == 0:
                 await self._condition.wait()
             return self._task_queue.popleft()
+
+    async def clear(self):
+        async with self._condition:
+            while len(self._task_queue) > 0:
+                _, task_result = self._task_queue.popleft()
+                if not task_result.done():
+                    task_result.cancel()

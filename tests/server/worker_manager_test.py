@@ -207,7 +207,9 @@ async def test_download_manager_never_restarts_on_error_result(
     assert download_worker_manager.restart_calls == 0
 
 
-async def test_download_manager_ignores_deadline(download_worker_manager):
+async def test_task_scoped_download_deadline_restarts_worker(
+    download_worker_manager,
+):
     worker_id = await download_worker_manager.connect("1.0.0")
     fut = await download_worker_manager.send_task(
         make_task_input(), deadline=time.time() + 0.1
@@ -215,7 +217,33 @@ async def test_download_manager_ignores_deadline(download_worker_manager):
     await download_worker_manager.get_task(worker_id)
 
     await sleep(0.5)
-    # No watchdog on the download manager: no restart, the task stays open
+    assert download_worker_manager.restart_calls == 1
+    with pytest.raises(TaskCancelled):
+        await fut.get()
+
+
+async def test_queued_task_scoped_download_is_cancelled_at_deadline(
+    download_worker_manager,
+):
+    await download_worker_manager.connect("1.0.0")
+    fut = await download_worker_manager.send_task(
+        make_task_input(), deadline=time.time() + 0.1
+    )
+
+    await sleep(0.5)
+    assert download_worker_manager.restart_calls == 1
+    with pytest.raises(TaskCancelled):
+        await fut.get()
+
+
+async def test_background_download_without_deadline_remains_unbounded(
+    download_worker_manager,
+):
+    worker_id = await download_worker_manager.connect("1.0.0")
+    fut = await download_worker_manager.send_task(make_task_input())
+    await download_worker_manager.get_task(worker_id)
+
+    await sleep(0.2)
     assert download_worker_manager.restart_calls == 0
     assert not fut.done()
 
