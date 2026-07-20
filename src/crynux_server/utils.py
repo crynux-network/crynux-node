@@ -11,9 +11,12 @@ from eth_account import Account
 from pydantic import BaseModel
 from web3 import Web3
 
+from crynux_server.config import load_env_file
+
 __all__ = [
     "sort_dict",
     "get_os",
+    "get_platform",
     "get_task_hash",
     "GpuInfo",
     "NvidiaGpuCard",
@@ -22,6 +25,8 @@ __all__ = [
     "aggregate_gpu_info",
     "get_gpu_info",
     "get_selected_gpu_device_uuids",
+    "resolve_gpt_executor",
+    "apply_gpu_name_executor_marker",
     "CpuInfo",
     "get_cpu_info",
     "MemoryInfo",
@@ -68,6 +73,12 @@ def is_running_in_docker():
         return True
 
     return False
+
+
+def get_platform() -> str:
+    if is_running_in_docker():
+        return "docker"
+    return get_os()
 
 
 class MemoryInfo(BaseModel):
@@ -238,6 +249,41 @@ def get_selected_gpu_device_uuids() -> List[str]:
     output = res.stdout.decode()
     cards = parse_nvidia_smi_gpus(output)
     return aggregate_gpu_info(cards).device_uuids
+
+
+GPT_EXECUTOR_TENSOR_PARALLEL = "tensor_parallel"
+GPT_EXECUTOR_CLASSIC = "classic"
+
+_TP_PLATFORMS = ("docker", "Linux")
+
+
+def resolve_gpt_executor(platform: str, gpu_count: int) -> str:
+    """Resolve the effective GPT executor mode for this node.
+
+    Tensor parallelism is the default on eligible machines: the
+    WORKER_GPT_EXECUTOR value in the config .env is tensor_parallel or
+    unset, the platform is docker or Linux, and the selected identical-model
+    GPU group has at least 2 cards. Any other .env value opts out.
+    """
+    env_value = load_env_file("WORKER_").get("GPT_EXECUTOR")
+    if env_value is not None and env_value != GPT_EXECUTOR_TENSOR_PARALLEL:
+        return GPT_EXECUTOR_CLASSIC
+    if platform not in _TP_PLATFORMS:
+        return GPT_EXECUTOR_CLASSIC
+    if gpu_count < 2:
+        return GPT_EXECUTOR_CLASSIC
+    return GPT_EXECUTOR_TENSOR_PARALLEL
+
+
+def apply_gpu_name_executor_marker(gpu_info: GpuInfo) -> str:
+    """Return the aggregated GPU name with a ' TP' marker appended when the
+    effective executor is tensor parallel. The marker separates TP nodes
+    from non-TP nodes in relay validation pools; the WebUI and the relay
+    name both go through this helper so the two can never disagree."""
+    executor = resolve_gpt_executor(get_platform(), len(gpu_info.device_uuids))
+    if executor == GPT_EXECUTOR_TENSOR_PARALLEL:
+        return gpu_info.model + " TP"
+    return gpu_info.model
 
 
 class CpuInfo(BaseModel):

@@ -100,6 +100,69 @@ def test_group_size_and_vram_tie_selects_lowest_index():
     assert info.device_uuids == ["GPU-ffffffff-ffff-ffff-ffff-ffffffffffff"]
 
 
+def test_resolve_gpt_executor_gating(monkeypatch):
+    env_values = {}
+    monkeypatch.setattr(utils, "load_env_file", lambda prefix: env_values)
+
+    # TP by default on eligible platforms with >= 2 GPUs
+    assert utils.resolve_gpt_executor("docker", 2) == "tensor_parallel"
+    assert utils.resolve_gpt_executor("Linux", 2) == "tensor_parallel"
+    assert utils.resolve_gpt_executor("docker", 4) == "tensor_parallel"
+
+    # ineligible platforms
+    assert utils.resolve_gpt_executor("Windows", 2) == "classic"
+    assert utils.resolve_gpt_executor("Darwin", 2) == "classic"
+
+    # single GPU or no GPU
+    assert utils.resolve_gpt_executor("docker", 1) == "classic"
+    assert utils.resolve_gpt_executor("Linux", 0) == "classic"
+
+    # explicit env value tensor_parallel keeps the gate rules
+    env_values["GPT_EXECUTOR"] = "tensor_parallel"
+    assert utils.resolve_gpt_executor("docker", 2) == "tensor_parallel"
+    assert utils.resolve_gpt_executor("Windows", 2) == "classic"
+    assert utils.resolve_gpt_executor("docker", 1) == "classic"
+
+    # classic opt-out wins everywhere
+    env_values["GPT_EXECUTOR"] = "classic"
+    assert utils.resolve_gpt_executor("docker", 2) == "classic"
+    assert utils.resolve_gpt_executor("Linux", 4) == "classic"
+
+    # any other value opts out
+    env_values["GPT_EXECUTOR"] = "unknown"
+    assert utils.resolve_gpt_executor("docker", 2) == "classic"
+
+
+def test_gpu_name_tp_marker_dual_gpu(monkeypatch):
+    monkeypatch.setattr(utils, "load_env_file", lambda prefix: {})
+    monkeypatch.setattr(utils, "get_platform", lambda: "docker")
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(DUAL_GPU_OUTPUT))
+    assert utils.apply_gpu_name_executor_marker(info) == "2x NVIDIA GeForce RTX 4090 TP"
+
+
+def test_gpu_name_tp_marker_opt_out(monkeypatch):
+    monkeypatch.setattr(
+        utils, "load_env_file", lambda prefix: {"GPT_EXECUTOR": "classic"}
+    )
+    monkeypatch.setattr(utils, "get_platform", lambda: "docker")
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(DUAL_GPU_OUTPUT))
+    assert utils.apply_gpu_name_executor_marker(info) == "2x NVIDIA GeForce RTX 4090"
+
+
+def test_gpu_name_single_gpu_unchanged(monkeypatch):
+    monkeypatch.setattr(utils, "load_env_file", lambda prefix: {})
+    monkeypatch.setattr(utils, "get_platform", lambda: "docker")
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(SINGLE_GPU_OUTPUT))
+    assert utils.apply_gpu_name_executor_marker(info) == "NVIDIA GeForce RTX 4090"
+
+
+def test_gpu_name_windows_unchanged(monkeypatch):
+    monkeypatch.setattr(utils, "load_env_file", lambda prefix: {})
+    monkeypatch.setattr(utils, "get_platform", lambda: "Windows")
+    info = utils.aggregate_gpu_info(utils.parse_nvidia_smi_gpus(DUAL_GPU_OUTPUT))
+    assert utils.apply_gpu_name_executor_marker(info) == "2x NVIDIA GeForce RTX 4090"
+
+
 async def test_gpu_info():
     gpu_info = await utils.get_gpu_info()
     assert len(gpu_info.model) > 0

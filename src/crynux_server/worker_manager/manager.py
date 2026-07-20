@@ -10,6 +10,7 @@ from typing import Dict, Literal, Optional, Set
 import psutil
 from anyio import Condition, Lock, fail_after, sleep
 
+from crynux_server import utils
 from crynux_server.config import Config, get_config, load_env_file
 from crynux_server.models import TaskInput, TaskResult
 from crynux_server.utils import get_selected_gpu_device_uuids
@@ -192,6 +193,19 @@ class WorkerManager(object):
                 "Applied worker environment variables from config .env: %s",
                 ", ".join(sorted(worker_envs.keys())),
             )
+
+        # The node is the single decision point for the GPT executor mode:
+        # GPT_EXECUTOR is injected only when tensor parallelism is effective
+        # and force-removed otherwise, regardless of the .env contents. The
+        # worker obeys the variable without re-checking the platform.
+        executor = utils.resolve_gpt_executor(
+            utils.get_platform(), len(device_uuids)
+        )
+        if executor == utils.GPT_EXECUTOR_TENSOR_PARALLEL:
+            envs["GPT_EXECUTOR"] = utils.GPT_EXECUTOR_TENSOR_PARALLEL
+        else:
+            envs.pop("GPT_EXECUTOR", None)
+        _logger.info("Effective GPT executor mode: %s", executor)
 
         return args, envs, worker_pid_file
 

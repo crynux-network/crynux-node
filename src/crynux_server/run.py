@@ -6,7 +6,6 @@ if __name__ == "__main__":
 import logging
 import math
 import os.path
-import platform
 import signal
 from typing import Optional
 
@@ -94,12 +93,9 @@ class CrynuxRunner(object):
             _logger.info("Web server init completed.")
 
             gpu_info = await utils.get_gpu_info()
-            gpu_name = gpu_info.model
+            gpu_name = utils.apply_gpu_name_executor_marker(gpu_info)
             gpu_vram_gb = math.ceil(gpu_info.vram_total_mb / 1024)
-            if utils.is_running_in_docker():
-                platform = "docker"
-            else:
-                platform = utils.get_os()
+            platform = utils.get_platform()
 
             _logger.info("Starting node manager...")
 

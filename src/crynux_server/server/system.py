@@ -27,7 +27,9 @@ async def update_system_info(
 ):
     try:
         with fail_after(5):
-            _system_info.gpu = await utils.get_gpu_info()
+            gpu_info = await utils.get_gpu_info()
+            gpu_info.model = utils.apply_gpu_name_executor_marker(gpu_info)
+            _system_info.gpu = gpu_info
     except TimeoutError:
         _logger.error("cannot get gpu info within 5 seconds")
         raise
