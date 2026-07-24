@@ -417,8 +417,11 @@ class WebRelay(Relay):
     async def get_balance(self, address: Optional[str] = None) -> int:
         if address is None:
             address = self.node_address
+        input = {"address": address}
+        timestamp, signature = self.signer.sign(input)
         resp = await self.client.get(
-            f"/v1/balance/{address}",
+            f"/v2/relay_account/{address}/balance",
+            params={"timestamp": timestamp, "signature": signature},
         )
         resp = _process_resp(resp, "getBalance")
         content = resp.json()

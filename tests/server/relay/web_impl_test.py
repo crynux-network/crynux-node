@@ -112,3 +112,35 @@ async def test_task_diagnostic_request_contains_signed_fields():
         assert field in body
     assert isinstance(body["captured_at"], int)
     assert "capture_time" not in body
+
+
+async def test_get_balance_uses_v2_signature_authorization():
+    captured = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured
+        captured = request
+        return httpx.Response(200, json={"data": "123"})
+
+    relay = make_relay(handler)
+    signed_input = None
+
+    def sign(input, timestamp=None):
+        nonlocal signed_input
+        signed_input = input
+        return 1784851234, "0x" + "01" * 65
+
+    relay.signer.sign = sign
+    try:
+        balance = await relay.get_balance()
+    finally:
+        await relay.client.aclose()
+
+    assert balance == 123
+    assert captured is not None
+    assert captured.url.path == f"/v2/relay_account/{relay.node_address}/balance"
+    assert dict(captured.url.params) == {
+        "timestamp": "1784851234",
+        "signature": "0x" + "01" * 65,
+    }
+    assert signed_input == {"address": relay.node_address}
