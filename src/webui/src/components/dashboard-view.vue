@@ -27,6 +27,8 @@ const systemStore = useSystemStore()
 
 const showSuccessAlert = ref(false)
 const isSaving = ref(false)
+const isFlushingTaskErrors = ref(false)
+const taskErrorFlushResult = ref(null)
 const hasLoadedAccountBalance = ref(false)
 const hasLoadedNodeStatus = ref(false)
 const minStakingAmountWei = ref(null)
@@ -65,6 +67,7 @@ const isStakingAmountValid = computed(() => {
 // Whether each field changed in Settings modal
 const isStakingChanged = computed(() => settingsInModal.staking_amount !== settings.staking_amount)
 const isDelegatorShareChanged = computed(() => settingsInModal.delegator_share !== accountStatus.delegator_share)
+const isTaskErrorReportChanged = computed(() => settingsInModal.task_error_report_automatic !== settings.task_error_report_automatic)
 
 // Compute dynamic gas and staking requirements for saving settings
 const stakingAmountDesiredWei = computed(() => {
@@ -104,10 +107,10 @@ const hasEnoughGas = computed(() => {
 
 // Save disabled rule: no changes OR invalid staking OR insufficient funds for gas/staking
 const isSettingsSaveDisabled = computed(() => {
-    const changed = isStakingChanged.value || isDelegatorShareChanged.value
+    const changed = isStakingChanged.value || isDelegatorShareChanged.value || isTaskErrorReportChanged.value
     if (!changed) return true
-    if (!isStakingAmountValid.value) return true
-    if (!hasEnoughForSave.value) return true
+    if (isStakingChanged.value && !isStakingAmountValid.value) return true
+    if ((isStakingChanged.value || isDelegatorShareChanged.value) && !hasEnoughForSave.value) return true
     return false
 })
 
@@ -189,12 +192,15 @@ const taskStatus = reactive({
 
 
 const settings = reactive({
-    staking_amount: null
+    staking_amount: null,
+    task_error_report_automatic: false,
+    pending_task_error_reports: 0
 })
 
 const settingsInModal = reactive({
     staking_amount: null,
-    delegator_share: 0
+    delegator_share: 0,
+    task_error_report_automatic: false
 })
 
 
@@ -437,6 +443,7 @@ watch(() => systemStore.showSettingsModal, (newValue) => {
         // Delegator share comes from account info, not settings API.
         settingsInModal.delegator_share = accountStatus.delegator_share
         showSuccessAlert.value = false
+        taskErrorFlushResult.value = null
         updateMinStakingAmount()
     }
 })
@@ -450,8 +457,9 @@ const handleSettingsSave = async () => {
     // Only send API requests for fields that actually changed; otherwise close the dialog.
     const changedStaking = settingsInModal.staking_amount !== settings.staking_amount
     const changedDelegatorShare = settingsInModal.delegator_share !== accountStatus.delegator_share
+    const changedTaskErrorReport = settingsInModal.task_error_report_automatic !== settings.task_error_report_automatic
 
-    if (!changedStaking && !changedDelegatorShare) {
+    if (!changedStaking && !changedDelegatorShare && !changedTaskErrorReport) {
         systemStore.showSettingsModal = false
         return
     }
@@ -465,6 +473,14 @@ const handleSettingsSave = async () => {
             await settingsAPI.updateSettings({ staking_amount: settingsInModal.staking_amount })
             apiContinuousErrorCount['settings'] = 0
             settings.staking_amount = settingsInModal.staking_amount
+        }
+
+        if (changedTaskErrorReport) {
+            await settingsAPI.updateSettings({
+                task_error_report_automatic: settingsInModal.task_error_report_automatic
+            })
+            apiContinuousErrorCount['settings'] = 0
+            settings.task_error_report_automatic = settingsInModal.task_error_report_automatic
         }
 
         // Update delegator share if changed
@@ -488,6 +504,28 @@ const handleSettingsSave = async () => {
 
 const handleSettingsCancel = () => {
     systemStore.showSettingsModal = false
+}
+
+const handleTaskErrorReportFlush = async () => {
+    isFlushingTaskErrors.value = true
+    taskErrorFlushResult.value = null
+    try {
+        const result = await settingsAPI.flushTaskErrorReports()
+        settings.pending_task_error_reports = result.remaining
+        taskErrorFlushResult.value = {
+            type: 'success',
+            message: `Reported ${result.reported}; ${result.remaining} remaining.`
+        }
+    } catch (e) {
+        taskErrorFlushResult.value = {
+            type: 'error',
+            message: 'Task error reports could not be sent. Please try again.'
+        }
+        logger.error('Flushing task error reports failed:')
+        logger.error(e)
+    } finally {
+        isFlushingTaskErrors.value = false
+    }
 }
 
 async function updateMinStakingAmount() {
@@ -1736,6 +1774,32 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
                         <a-typography-text>{{ settingsInModal.delegator_share }}%</a-typography-text>
                     </a-col>
                 </a-row>
+            </a-form-item>
+            <a-form-item label="Task Error Reporting">
+                <a-space direction="vertical">
+                    <a-space>
+                        <a-switch v-model:checked="settingsInModal.task_error_report_automatic" />
+                        <a-typography-text>Automatically report task execution errors</a-typography-text>
+                    </a-space>
+                    <a-space>
+                        <a-button
+                            :loading="isFlushingTaskErrors"
+                            :disabled="settings.pending_task_error_reports === 0"
+                            @click="handleTaskErrorReportFlush"
+                        >
+                            Report saved errors now
+                        </a-button>
+                        <a-typography-text type="secondary">
+                            {{ settings.pending_task_error_reports }} pending
+                        </a-typography-text>
+                    </a-space>
+                    <a-alert
+                        v-if="taskErrorFlushResult"
+                        :type="taskErrorFlushResult.type"
+                        :message="taskErrorFlushResult.message"
+                        show-icon
+                    />
+                </a-space>
             </a-form-item>
         </a-form>
     </a-modal>

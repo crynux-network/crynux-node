@@ -3,6 +3,8 @@ import logging
 import os.path
 import shutil
 import time
+import traceback
+from datetime import datetime, timezone
 from typing import Dict, List, Literal, Optional
 
 from anyio import fail_after, get_cancelled_exc_class, sleep, to_thread
@@ -15,8 +17,10 @@ from crynux_server.relay import Relay, get_relay
 from crynux_server.relay.exceptions import RelayError
 from crynux_server.worker_manager import (TaskCancelled, TaskDownloadError,
                                           TaskExecutionError, TaskInvalid,
+                                          TaskCancellationType,
                                           get_worker_manager)
 
+from .error_report import TaskErrorReporter
 from .state_cache import (InferenceTaskStateCache,
                           get_inference_task_state_cache)
 from .utils import run_inference_task, validate_score
@@ -67,6 +71,7 @@ class TaskReconciler(object):
         state_cache: Optional[InferenceTaskStateCache] = None,
         config: Optional[Config] = None,
         interval: float = 1,
+        error_reporter: Optional[TaskErrorReporter] = None,
     ):
         if relay is None:
             relay = get_relay()
@@ -78,6 +83,7 @@ class TaskReconciler(object):
             config = get_config()
         self.config = config
         self.interval = interval
+        self.error_reporter = error_reporter
 
         # The task the loop is currently tracking as open
         self._tracked_task_id: Optional[bytes] = None
@@ -240,6 +246,7 @@ class TaskReconciler(object):
         task_id = bytes(state.task_id_commitment)
         task_id_hex = HexBytes(task_id).hex()
         deadline = self._task_deadline(task) + EXECUTION_DEADLINE_DELAY
+        original_task_args = task.task_args
 
         _logger.info(f"Start executing task {task_id_hex}")
         try:
@@ -247,9 +254,7 @@ class TaskReconciler(object):
                 state, task, deadline
             )
             if not validate_score(score):
-                raise TaskExecutionError(
-                    f"Task {task_id_hex} score {score.hex()} is invalid"
-                )
+                raise ValueError(f"Task {task_id_hex} score {score.hex()} is invalid")
             # Persist the result files and score before any submission attempt
             state.files = files
             state.score = score
@@ -261,13 +266,143 @@ class TaskReconciler(object):
             _logger.exception(e)
             _logger.error(f"Task {task_id_hex} is invalid, will report the task error")
             self._execution_outcomes[task_id] = "invalid"
-        except TaskCancelled:
+            await self._capture_diagnostic(
+                task_id,
+                original_task_args,
+                "TaskInvalid",
+                "Worker rejected invalid Task arguments",
+                e.msg,
+            )
+        except TaskCancelled as e:
             _logger.error(f"Task {task_id_hex} execution is cancelled")
             self._execution_outcomes[task_id] = "cancelled"
+            await self._capture_cancellation(task_id, original_task_args, e)
         except TaskExecutionError as e:
             _logger.exception(e)
             _logger.error(f"Task {task_id_hex} execution failed")
             self._execution_outcomes[task_id] = "failed"
+            cause = e.__cause__
+            if isinstance(cause, TaskCancelled):
+                await self._capture_cancellation(task_id, original_task_args, cause)
+            elif isinstance(e, TaskDownloadError) or isinstance(
+                cause, TaskDownloadError
+            ):
+                download_error = e if isinstance(e, TaskDownloadError) else cause
+                error_type = "TaskDownloadError"
+                stack_trace = (
+                    f"{download_error.msg}\n\nServer exception chain:\n"
+                    + "".join(
+                        traceback.format_exception(type(e), e, e.__traceback__)
+                    )
+                )
+                message = "Foreground model download failed"
+                await self._capture_diagnostic(
+                    task_id,
+                    original_task_args,
+                    error_type,
+                    message,
+                    stack_trace,
+                )
+            else:
+                error_type = "TaskExecutionError"
+                stack_trace = e.msg
+                message = "Worker Task execution failed"
+                await self._capture_diagnostic(
+                    task_id,
+                    original_task_args,
+                    error_type,
+                    message,
+                    stack_trace,
+                )
+        except Exception as e:
+            _logger.exception(e)
+            _logger.error(f"Node failed while executing task {task_id_hex}")
+            self._execution_outcomes[task_id] = "failed"
+            await self._capture_diagnostic(
+                task_id,
+                original_task_args,
+                "NodeTaskExecutionError",
+                str(e) or repr(e),
+                "".join(traceback.format_exception(type(e), e, e.__traceback__)),
+            )
+
+    async def _capture_diagnostic(
+        self,
+        task_id: bytes,
+        task_args: str,
+        error_type: str,
+        message: str,
+        stack_trace: str,
+    ):
+        if self.error_reporter is None:
+            return
+        try:
+            await self.error_reporter.capture(
+                task_id, task_args, error_type, message, stack_trace
+            )
+        except Exception:
+            _logger.exception(
+                "Failed to persist Task diagnostic for %s", HexBytes(task_id).hex()
+            )
+
+    async def _capture_cancellation(
+        self, task_id: bytes, task_args: str, error: TaskCancelled
+    ):
+        cancellation_type = error.cancellation.cancellation_type
+        if cancellation_type in (
+            TaskCancellationType.RUNNER_VERSION_SYNC,
+            TaskCancellationType.PROCESS_SHUTDOWN,
+        ):
+            return
+        error_types = {
+            TaskCancellationType.WORKER_TASK_TIMEOUT: "WorkerTaskTimeout",
+            TaskCancellationType.WORKER_DISCONNECTED: "WorkerDisconnected",
+            TaskCancellationType.WORKER_RESTARTED: "WorkerRestarted",
+            TaskCancellationType.NODE_INTERNAL: "NodeTaskExecutionInterrupted",
+            TaskCancellationType.CALLER_CANCELLED: "NodeTaskExecutionInterrupted",
+        }
+        await self._capture_diagnostic(
+            task_id,
+            task_args,
+            error_types[cancellation_type],
+            error.cancellation.reason,
+            error.cancellation.explanation(),
+        )
+
+    async def report_internal_interruption(self, reason: str):
+        task_id = self._tracked_task_id
+        if task_id is None:
+            return
+        try:
+            task = await self.relay.get_task(task_id)
+        except Exception:
+            _logger.exception(
+                "Cannot load Task context while reporting TaskSystem interruption"
+            )
+            return
+        interrupted_at = time.time()
+        deadline = self._task_deadline(task) + EXECUTION_DEADLINE_DELAY
+        await self._capture_diagnostic(
+            task_id,
+            task.task_args,
+            "NodeTaskExecutionInterrupted",
+            reason,
+            "\n".join(
+                [
+                    "No Worker traceback is available.",
+                    "Cancellation type: node_internal.",
+                    "Initiating component: task_system.",
+                    f"Reason: {reason}.",
+                    "Worker role: inference.",
+                    "Worker ID: unknown.",
+                    "Task phase: unknown.",
+                    f"Interruption time: {datetime.fromtimestamp(interrupted_at, timezone.utc).isoformat()}.",
+                    f"Task deadline: {datetime.fromtimestamp(deadline, timezone.utc).isoformat()}.",
+                    f"Deadline reached: {'yes' if interrupted_at >= deadline else 'no'}.",
+                    "No Worker result was received.",
+                ]
+            ),
+        )
 
     # Run the task on the worker through the worker manager and return
     # (files, score, checkpoint)
@@ -326,12 +461,12 @@ class TaskReconciler(object):
                 if not model_id.lower().startswith("base:")
             ]
         except (ValueError, ValidationError) as e:
-            raise TaskExecutionError(
+            raise TaskDownloadError(
                 f"Task {task_id_hex} has an invalid auxiliary model ID"
             ) from e
         for index, model in enumerate(auxiliary_models):
             if time.time() >= deadline:
-                raise TaskExecutionError(
+                raise TaskDownloadError(
                     f"Task {task_id_hex} auxiliary model download deadline expired"
                 )
             task_input = models.TaskInput(
@@ -342,9 +477,7 @@ class TaskReconciler(object):
                     model=model,
                 )
             )
-            task_result = await worker_manager.send_task(
-                task_input, deadline=deadline
-            )
+            task_result = await worker_manager.send_task(task_input, deadline=deadline)
             try:
                 await task_result.get()
             except (TaskCancelled, TaskDownloadError) as e:

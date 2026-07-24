@@ -33,6 +33,7 @@ async def task_producer(
             )
             continue
         await websocket.send_json(task_input.model_dump())
+        worker_manager.mark_task_sent(task_input.task.task_id, worker_id)
 
 
 async def result_consumer(

@@ -170,6 +170,28 @@ class WebRelay(Relay):
         resp = _process_resp(resp, "reportTaskError")
 
     @_web_relay_restart_pool_error
+    async def report_task_diagnostic(self, report):
+        signed_input = {
+            "node_address": report.node_address,
+            "task_id_commitment": report.task_id_commitment,
+            "task_args": report.task_args,
+            "error_type": report.error_type,
+            "message": report.message,
+            "stack_trace": report.stack_trace,
+        }
+        timestamp, signature = self.signer.sign(signed_input)
+        resp = await self.client.post(
+            f"/v2/tasks/{report.task_id_commitment}/node_error",
+            json={
+                **signed_input,
+                "captured_at": report.captured_at,
+                "timestamp": timestamp,
+                "signature": signature,
+            },
+        )
+        _process_resp(resp, "reportTaskDiagnostic")
+
+    @_web_relay_restart_pool_error
     async def submit_task_score(self, task_id_commitment: bytes, score: bytes):
         task_id_commitment_hex = HexBytes(task_id_commitment).hex()
         score_hex = HexBytes(score).hex()
@@ -402,7 +424,7 @@ class WebRelay(Relay):
         content = resp.json()
         balance = content["data"]
         return Web3.to_wei(balance, "wei")
-    
+
     @_web_relay_restart_pool_error
     async def get_staking_amount(self) -> int:
         resp = await self.client.get(

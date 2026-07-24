@@ -14,6 +14,11 @@ on:
       tag:
         description: 'Release version to build from v-prefixed git tag (if not specified, use selected ref and git hash)'
         required: false
+      task_error_report_automatic:
+        description: 'Enable automatic Task error diagnostic reporting by default'
+        required: true
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -59,7 +64,7 @@ jobs:
       - name: Set the config files
         run: |
             chmod +x build/set-config-files.sh
-            ./build/set-config-files.sh ${{ inputs.blockchain }}
+            ./build/set-config-files.sh ${{ inputs.blockchain }} ${{ inputs.task_error_report_automatic }}
 
       - name: Configure Docker storage
         shell: bash

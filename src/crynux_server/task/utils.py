@@ -12,7 +12,7 @@ from crynux_server.models import (
     ModelConfig,
     DownloadTaskInput,
 )
-from crynux_server.worker_manager import get_worker_manager
+from crynux_server.worker_manager import TaskCancellationType, get_worker_manager
 
 
 def get_image_hash(filename: str) -> bytes:
@@ -50,7 +50,11 @@ async def run_inference_task(
         # Drop the queued task so it is never sent to the worker
         # after the awaiting runner has been cancelled
         if not task_result.done():
-            task_result.cancel()
+            task_result.cancel(
+                TaskCancellationType.CALLER_CANCELLED,
+                "task_reconciler",
+                "the task runner stopped waiting before Worker dispatch",
+            )
         raise
 
     files: List[str] = []
@@ -96,4 +100,4 @@ async def run_download_task(
 
 
 def validate_score(score: bytes) -> bool:
-    return len(score) > 0 and len(score) % 8 == 0 and not all(b==0 for b in score)
+    return len(score) > 0 and len(score) % 8 == 0 and not all(b == 0 for b in score)

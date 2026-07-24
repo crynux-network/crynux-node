@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import tempfile
+import threading
 from contextlib import contextmanager
 from functools import partial
 from typing import Any, Dict, List, Literal, Tuple, Type, TypedDict, Optional
@@ -32,6 +34,7 @@ __all__ = [
     "get_staking_amount",
     "ensure_staking_amount",
     "set_staking_amount",
+    "set_task_error_report_automatic",
     "env_file_path",
     "load_env_file",
     "apply_server_env",
@@ -266,6 +269,10 @@ class ProxyConfig(BaseModel):
     password: str = ""
 
 
+class TaskErrorReportConfig(BaseModel):
+    automatic: bool = False
+
+
 class Config(BaseSettings):
     log: LogConfig
 
@@ -275,6 +282,9 @@ class Config(BaseSettings):
     relay_url: str
 
     task_config: TaskConfig
+    task_error_report: TaskErrorReportConfig = Field(
+        default_factory=TaskErrorReportConfig
+    )
 
     server_host: str = "0.0.0.0"
     server_port: int = 7412
@@ -395,6 +405,40 @@ def set_staking_amount(amount: int):
         f.write(content)
 
 
+_config_write_lock = threading.Lock()
+
+
+def _write_yaml_value(section: str, key: str, value: Any):
+    config_file = config_file_path()
+    with _config_write_lock:
+        with open(config_file, mode="r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        section_data = data.setdefault(section, {})
+        if not isinstance(section_data, dict):
+            raise ValueError(f"Config section {section} must be a mapping")
+        section_data[key] = value
+
+        dirname = os.path.dirname(config_file)
+        fd, tmp_filename = tempfile.mkstemp(
+            dir=dirname, prefix=".config.yml.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, mode="w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_filename, config_file)
+        finally:
+            if os.path.exists(tmp_filename):
+                os.remove(tmp_filename)
+
+
+def set_task_error_report_automatic(automatic: bool):
+    config = get_config()
+    _write_yaml_value("task_error_report", "automatic", automatic)
+    config.task_error_report.automatic = automatic
+
+
 class TxOption(TypedDict, total=False):
     chainId: int
     gas: int
@@ -424,7 +468,6 @@ def get_default_tx_option() -> TxOption:
 
 def get_requests_proxy_url(proxy: ProxyConfig | None) -> str | None:
     if proxy is not None and proxy.host != "":
-
         if "://" in proxy.host:
             scheme, host = proxy.host.split("://", 2)
         else:

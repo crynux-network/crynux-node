@@ -1,6 +1,6 @@
 # Task Lifecycle
 
-This document specifies the business-level lifecycle of an inference task on the node: the condition-to-action rules the reconcile loop applies at each relay task status, and all failure outcomes. The reconcile loop itself, the worker manager, and all non-protocol failure handling (worker restarts, relay communication failures, exception containment) are specified in `docs/task-system-design.md`. How the node observes relay state and recovers after a restart is specified in `docs/state-tracking.md`.
+This document specifies the business-level lifecycle of an inference task on the node: the condition-to-action rules the reconcile loop applies at each relay task status, and all failure outcomes. The reconcile loop itself, the worker manager, and all non-protocol failure handling (worker restarts, relay communication failures, exception containment) are specified in `docs/task-system-design.md`. How the node observes relay state and recovers after a restart is specified in `docs/state-tracking.md`. The independent failure diagnostic channel is specified in `docs/task_error_report.md`.
 
 ## 1) Error Classification
 
@@ -21,6 +21,7 @@ Therefore:
 
 - The node MUST call `report_task_error` on the relay if and only if the failure is classified as `TaskInvalid`.
 - The node MUST NOT report a task error for any `TaskExecutionError`. The conservative path for these failures is to remain silent and let the task reach a terminal status through the relay-side timeout, accepting the QoS penalty.
+- Diagnostic persistence and `POST /v2/tasks/:task_id_commitment/node_error` MUST NOT count as a protocol Task error report. `TaskInvalid` MUST continue through the existing `report_task_error` protocol action in addition to diagnostic capture. Every other diagnostic type MUST retain the existing silent timeout behavior.
 
 ## 2) Reconcile Conditions and Actions
 
@@ -48,6 +49,7 @@ The relay sets the node's current-task pointer in the same transaction that sets
 - **`TaskInvalid`**: the loop reports the task error to the relay. Score submission MUST NOT be attempted afterwards. The task converges when a later cycle observes `ErrorReported` and closes it.
 - **`TaskExecutionError`**: the loop logs the failure and closes the task locally. This includes foreground download failure, cancellation, and deadline expiry. Inference MUST NOT start after a foreground download failure. The loop MUST NOT report a task error and MUST NOT re-execute. The task remains `Started` on the relay and is aborted by the relay's timeout processor; worker recovery is the worker manager's responsibility and happens independently.
 - **`TaskCancelled`** (the execution future was cancelled by a worker restart): handled exactly like `TaskExecutionError`: log and close locally, without reporting a task error. A cancelled execution MUST NOT trigger another worker restart.
+- **Diagnostic capture**: before closing a failed local execution, the reconciler MUST persist the original Worker traceback for `TaskInvalid` and `TaskExecutionError`, the complete chained exception for a foreground download failure, or the reasoned no-traceback explanation for cancellation. Runner version synchronization, background pre-download, and whole-process shutdown MUST NOT create a Task diagnostic. Diagnostic capture failure MUST NOT change the execution outcome or protocol action.
 
 ### Foreground download phase
 

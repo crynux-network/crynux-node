@@ -12,7 +12,9 @@ from crynux_server import models
 from crynux_server.relay.exceptions import RelayError
 from crynux_server.task import MemoryInferenceTaskStateCache, TaskReconciler
 from crynux_server.worker_manager import (TaskCancelled, TaskDownloadError,
-                                          TaskExecutionError, TaskInvalid)
+                                          TaskExecutionError, TaskInvalid,
+                                          TaskCancellation,
+                                          TaskCancellationType, TaskPhase)
 from crynux_server.task import reconciler as reconciler_module
 
 TASK_ID_1 = bytes([1] * 32)
@@ -162,6 +164,23 @@ class FakeDownloadManager:
         return FakeDownloadResult(self.error)
 
 
+class FakeErrorReporter:
+    def __init__(self):
+        self.reports = []
+
+    async def capture(self, task_id, task_args, error_type, message, stack_trace):
+        self.reports.append(
+            {
+                "task_id": task_id,
+                "task_args": task_args,
+                "error_type": error_type,
+                "message": message,
+                "stack_trace": stack_trace,
+            }
+        )
+        return True
+
+
 def make_reconciler(relay, worker_result=None, cache=None):
     if cache is None:
         cache = MemoryInferenceTaskStateCache()
@@ -243,6 +262,128 @@ async def test_execution_error_closes_task_silently():
     await cycle(reconciler)
     assert relay.calls["get_task"] == get_task_calls
     assert reconciler.execute_calls == 1
+
+
+async def test_worker_traceback_is_preserved_in_diagnostic():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    worker_traceback = "Traceback (most recent call last):\nworker.py:1\nCUDA error"
+    reconciler = make_reconciler(
+        relay, worker_result=TaskExecutionError(worker_traceback)
+    )
+    reporter = FakeErrorReporter()
+    reconciler.error_reporter = reporter
+
+    await cycle(reconciler)
+
+    assert reporter.reports[0]["error_type"] == "TaskExecutionError"
+    assert reporter.reports[0]["stack_trace"] == worker_traceback
+    assert relay.calls["report_task_error"] == 0
+
+
+async def test_download_worker_traceback_and_server_chain_are_preserved():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    worker_traceback = (
+        "Traceback (most recent call last):\n"
+        '  File "download.py", line 7\n'
+        "RuntimeError: download failed"
+    )
+    error = TaskExecutionError("Task auxiliary model download failed")
+    error.__cause__ = TaskDownloadError(worker_traceback)
+    reconciler = make_reconciler(relay, worker_result=error)
+    reporter = FakeErrorReporter()
+    reconciler.error_reporter = reporter
+
+    await cycle(reconciler)
+
+    report = reporter.reports[0]
+    assert report["error_type"] == "TaskDownloadError"
+    assert report["stack_trace"].startswith(worker_traceback)
+    assert "Server exception chain:" in report["stack_trace"]
+    assert "Task auxiliary model download failed" in report["stack_trace"]
+
+
+async def test_reasoned_cancellation_reports_timeout_context():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    cancellation = TaskCancellation(
+        cancellation_type=TaskCancellationType.WORKER_TASK_TIMEOUT,
+        initiated_by="worker_manager.watchdog",
+        reason="deadline reached",
+        worker_role="inference",
+        worker_id=7,
+        phase=TaskPhase.SENT,
+        task_id=TASK_ID_1.hex(),
+        deadline=time.time() - 1,
+        cancelled_at=time.time(),
+    )
+    reconciler = make_reconciler(relay, worker_result=TaskCancelled(cancellation))
+    reporter = FakeErrorReporter()
+    reconciler.error_reporter = reporter
+
+    await cycle(reconciler)
+
+    report = reporter.reports[0]
+    assert report["error_type"] == "WorkerTaskTimeout"
+    assert "Task phase: sent" in report["stack_trace"]
+    assert "No Worker result was received" in report["stack_trace"]
+
+
+async def test_runner_sync_cancellation_is_not_reported():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    cancellation = TaskCancellation(
+        cancellation_type=TaskCancellationType.RUNNER_VERSION_SYNC,
+        initiated_by="node_manager",
+        reason="runner version synchronization",
+        worker_role="download",
+        worker_id=3,
+        phase=TaskPhase.SENT,
+        task_id=TASK_ID_1.hex(),
+        deadline=time.time() + 30,
+        cancelled_at=time.time(),
+    )
+    reconciler = make_reconciler(relay, worker_result=TaskCancelled(cancellation))
+    reporter = FakeErrorReporter()
+    reconciler.error_reporter = reporter
+
+    await cycle(reconciler)
+
+    assert reporter.reports == []
+
+
+async def test_download_restart_cancellation_reports_worker_restarted():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    cancellation = TaskCancellation(
+        cancellation_type=TaskCancellationType.WORKER_RESTARTED,
+        initiated_by="worker_manager.restart",
+        reason="download worker health recovery",
+        worker_role="download",
+        worker_id=4,
+        phase=TaskPhase.SENT,
+        task_id=f"{TASK_ID_1.hex()}:aux:0",
+        deadline=time.time() + 30,
+        cancelled_at=time.time(),
+    )
+    error = TaskExecutionError("Task auxiliary model download failed")
+    error.__cause__ = TaskCancelled(cancellation)
+    reconciler = make_reconciler(relay, worker_result=error)
+    reporter = FakeErrorReporter()
+    reconciler.error_reporter = reporter
+
+    await cycle(reconciler)
+
+    report = reporter.reports[0]
+    assert report["error_type"] == "WorkerRestarted"
+    assert "Cancellation type: worker_restarted" in report["stack_trace"]
+    assert "Worker role: download" in report["stack_trace"]
 
 
 async def test_auxiliary_models_download_before_inference(monkeypatch):

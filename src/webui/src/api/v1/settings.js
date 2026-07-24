@@ -20,6 +20,10 @@ class SettingsAPI extends BaseAPI {
     updateSettings(settings) {
         return this.getHttpClient().post('/settings', settings)
     }
+
+    flushTaskErrorReports() {
+        return this.getHttpClient().post('/settings/task-error-reports/flush')
+    }
 }
 
 export default SettingsAPI

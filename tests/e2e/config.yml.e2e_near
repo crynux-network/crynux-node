@@ -5,6 +5,9 @@ log:
   # Log level could be "DEBUG", "INFO", "WARNING", "ERROR"
   level: "INFO"
 
+task_error_report:
+  automatic: false
+
 ethereum:
   # Keep online chain for e2e integration
   provider: "https://json-rpc.testnet-near.crynux.io"

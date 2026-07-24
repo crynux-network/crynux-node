@@ -4,15 +4,14 @@ from typing import Dict, Optional
 
 from anyio import create_task_group, get_cancelled_exc_class
 from anyio.abc import TaskGroup
-from tenacity import (retry, stop_after_attempt, stop_never, wait_exponential,
-                      wait_fixed)
+from tenacity import retry, stop_after_attempt, stop_never, wait_exponential, wait_fixed
 
 from crynux_server.contracts import Contracts
-from crynux_server.models import (DownloadTaskState, DownloadTaskStatus,
-                                  TaskType)
+from crynux_server.models import DownloadTaskState, DownloadTaskStatus, TaskType
 from crynux_server.relay.abc import Relay
 
 from .download_task import DownloadTaskRunner
+from .error_report import TaskErrorReporter, TaskErrorReportStore
 from .reconciler import TaskReconciler
 from .state_cache import DownloadTaskStateCache, InferenceTaskStateCache
 
@@ -34,6 +33,7 @@ class TaskSystem(object):
         relay: Relay,
         retry: bool = True,
         reconciler: Optional[TaskReconciler] = None,
+        error_reporter: Optional[TaskErrorReporter] = None,
     ) -> None:
         self._inference_state_cache = inference_state_cache
         self._download_state_cache = download_state_cache
@@ -41,10 +41,20 @@ class TaskSystem(object):
         self._relay = relay
         self._retry = retry
 
+        if error_reporter is None:
+            error_reporter = TaskErrorReporter(
+                store=TaskErrorReportStore.from_config(), relay=relay
+            )
+        self.error_reporter = error_reporter
+
         if reconciler is None:
             reconciler = TaskReconciler(
-                relay=relay, state_cache=inference_state_cache
+                relay=relay,
+                state_cache=inference_state_cache,
+                error_reporter=error_reporter,
             )
+        elif reconciler.error_reporter is None:
+            reconciler.error_reporter = error_reporter
         self._reconciler = reconciler
 
         self._tg: Optional[TaskGroup] = None
@@ -148,6 +158,7 @@ class TaskSystem(object):
             try:
                 async with create_task_group() as tg:
                     self._tg = tg
+                    tg.start_soon(self.error_reporter.run)
                     tg.start_soon(self._reconciler.run)
                     await self._recover_download_task(tg)
                     while True:
@@ -159,7 +170,8 @@ class TaskSystem(object):
             except get_cancelled_exc_class():
                 raise
             except Exception as e:
-                _logger.error(f"Some error occurs when running task system, retrying")
+                await self._reconciler.report_internal_interruption(str(e))
+                _logger.error("Some error occurs when running task system, retrying")
                 _logger.exception(e)
                 raise
             finally:

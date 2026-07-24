@@ -5,6 +5,9 @@ log:
   # Log level could be "DEBUG", "INFO", "WARNING", "ERROR"
   level: "INFO"
 
+task_error_report:
+  automatic: false
+
 ethereum:
   # The JSON RPC endpoint of the Blockchain node
   # Here we use the private chain for the Hydrogen Network

@@ -6,6 +6,7 @@ Related documents:
 
 - `docs/task-lifecycle.md` specifies the business-level task lifecycle: the condition-to-action rules the reconcile loop applies at each relay task status, and all failure outcomes.
 - `docs/state-tracking.md` specifies how the node stays consistent with the relay: the query system, the event system, and recovery after a node restart.
+- `docs/task_error_report.md` specifies the independent Task failure diagnostic channel, local persistence, and Relay reporting contract.
 
 ## 1) Design Principles
 
@@ -29,6 +30,7 @@ Rules that keep the two domains separate:
 - An infrastructure recovery action MUST NOT issue protocol actions: no error report, no abort, no score or result operation.
 - A protocol decision MUST NOT depend on infrastructure state (worker health, restart history), and the protocol path MUST NOT manage processes.
 - Failure information crosses the boundary in one direction only: the typed outcome of a task execution (success, `TaskInvalid`, `TaskExecutionError`, `TaskCancelled`) is visible to both domains, and each domain acts on it independently. The reconcile loop performs the protocol action; the worker manager performs the local recovery. Neither waits for or triggers the other.
+- The diagnostic channel MUST observe failures from both domains without issuing or changing any protocol action. Diagnostic persistence and delivery failures MUST be logged and MUST NOT alter reconciliation, Worker recovery, Task status, QoS, settlement, validation, or slashing.
 
 ## 2) Components and Responsibilities
 
@@ -38,6 +40,7 @@ Rules that keep the two domains separate:
 - **Relay HTTP client** (`src/crynux_server/relay/web_impl.py`): a thin transport layer. Every request is a single attempt; transport errors and all HTTP error responses propagate to the caller unchanged. It contains no retry, backoff, or error-resolution logic.
 - **Event Watcher** (`src/crynux_server/watcher/watcher.py`): polls the relay event stream and dispatches `DownloadModel` events, the only channel for background base-model pre-download commands, and node status display events. It plays no role in inference task handling; foreground non-base-model downloads are derived by the reconcile loop from the authoritative task record.
 - **Node Manager** (`src/crynux_server/node_manager/`): wires components together and synchronizes node status for display.
+- **Task Error Reporter** (`src/crynux_server/task/error_report.py`): persists at most one diagnostic record per Node Address and Task ID Commitment in `task_error_reports.json` under the configured log directory. It writes through a locked temporary-file replacement, restores pending records after restart, and sends them to Relay one at a time. It removes a record only after Relay acknowledgment and stops a reporting pass on the first failure. Automatic reporting runs only when configured; manual reporting uses the same serialized flush operation.
 - **Worker Processes** (`crynux-worker`): two independent worker processes, each a supervisor with a single child process selected by the required `worker_role` config (`inference` or `download`). The inference worker executes inference tasks sequentially in a single CUDA context and never downloads models: all model loads run with `local_files_only`, and a model absent from the local cache fails the task with the `Task model not downloaded` error. The download worker downloads models serially and uses no GPU. The server MUST dispatch requested downloads without inspecting the Hugging Face cache; the download worker MUST make repeated requests idempotent. The two workers do not coordinate through any lock: the Hugging Face cache writes files atomically (download to a temporary file, then move), so the inference worker never observes a half-written model file; a partially present snapshot fails the `local_files_only` load and converges once the download completes. Each child reports success or an error traceback per task and keeps running after task failures.
 
 The diagram shows the component topology. Four OS processes exist: the relay server, the node process (`crynux_server`, a Python asyncio program in which every component below runs as an object or asyncio task inside one event loop), the inference worker process, and the download worker process.
@@ -114,6 +117,7 @@ The inference worker manager monitors worker health on its own authority, using 
 - The watchdog judges completion by results the worker actually reports (success or error), never by the local task future state. A task future cancelled from the caller side does not count as a result; the watchdog entry is cleared only by a worker-reported result or by a worker restart.
 - The worker MUST NOT be restarted for `TaskInvalid` results (the task is at fault, the worker is healthy), for `Task model not downloaded` results, for successful results, or for tasks that were never dispatched to the worker.
 - An inference worker restart cancels the in-flight and queued task futures of the inference manager only; download tasks are unaffected. An inference task whose execution is cancelled this way ends through the `TaskCancelled` path specified in `docs/task-lifecycle.md`; a cancelled execution MUST NOT trigger another worker restart.
+- Every Worker future MUST be registered when queued and MUST track its `queued`, `dispatched`, and `sent` phase. Cancellation MUST carry the initiating component, typed reason, Worker role and identity, phase, deadline, cancellation time, and whether the deadline was reached. Deadline expiration MUST mark the expired future as `WorkerTaskTimeout` before restarting the Worker; other futures interrupted by that restart MUST be marked `WorkerRestarted`. WebSocket disconnect MUST mark unfinished futures as `WorkerDisconnected`. Runner version synchronization and whole-process shutdown MUST use distinct cancellation reasons and MUST NOT create diagnostic records.
 
 For a foreground download, a worker-reported failure, cancellation caused by a download worker restart, or an already expired Relay task deadline MUST become `TaskExecutionError` for the owning inference task. The reconciler MUST NOT dispatch inference after any of these outcomes.
 

@@ -3,12 +3,18 @@
 # Check if blockchain argument is provided
 if [ $# -eq 0 ]; then
     echo "Error: No blockchain argument provided"
-    echo "Usage: $0 <blockchain>"
+    echo "Usage: $0 <blockchain> [task_error_report_automatic]"
     exit 1
 fi
 
 # Get the blockchain argument
 blockchain=$1
+task_error_report_automatic=${2:-false}
+
+if [[ "$task_error_report_automatic" != "true" && "$task_error_report_automatic" != "false" ]]; then
+    echo "Error: task_error_report_automatic must be true or false"
+    exit 1
+fi
 
 # Define an array of file pairs with names
 # Format: "name|source_path|destination_path"
@@ -44,5 +50,12 @@ for pair in "${file_pairs[@]}"; do
 
     echo ""
 done
+
+docker_config="./build/docker/config.yml.example"
+sed -i -E "/^task_error_report:$/ { n; s/^([[:space:]]*automatic:).*/\1 ${task_error_report_automatic}/; }" "$docker_config"
+if ! grep -q "^  automatic: ${task_error_report_automatic}$" "$docker_config"; then
+    echo "Error: Failed to configure task_error_report.automatic"
+    exit 1
+fi
 
 echo "Configuration update completed."

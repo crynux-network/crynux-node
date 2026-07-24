@@ -46,6 +46,7 @@ from crynux_server.task import (
 )
 from crynux_server.watcher import EventWatcher, set_watcher
 from crynux_server.worker_manager import (
+    TaskCancellationType,
     TaskCancelled,
     TaskDownloadError,
     TaskError,
@@ -368,7 +369,7 @@ class NodeManager(object):
         for i, task_input in enumerate(task_inputs):
             task_fut = await self._download_worker_manager.send_task(task_input)
             try:
-                msg = f"Downloading models............ ({i+1}/{len(task_inputs)})"
+                msg = f"Downloading models............ ({i + 1}/{len(task_inputs)})"
                 _logger.info(msg)
                 await self.state_cache.set_node_state(
                     status=models.NodeStatus.Init, init_message=msg
@@ -634,7 +635,7 @@ class NodeManager(object):
                             models.ChainNodeStakingStatus.PendingUnstaked,
                             models.ChainNodeStakingStatus.Unstaked,
                         ]
-                    ):  
+                    ):
                         _logger.info("Node is unstaked but not quit, quitting now...")
                         await self._relay.node_quit()
                         return False
@@ -685,7 +686,8 @@ class NodeManager(object):
                         # The download worker has no patch loop of its own:
                         # restart it so both workers run the same code
                         await self._download_worker_manager.restart(
-                            reason=f"inference worker updated to version {version}"
+                            reason=f"inference worker updated to version {version}",
+                            cancellation_type=TaskCancellationType.RUNNER_VERSION_SYNC,
                         )
                     current_version = version
 

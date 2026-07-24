@@ -12,9 +12,7 @@ class TaskExchange(object):
         self._condition = Condition()
         self._task_queue: Deque[Tuple[TaskInput, TaskFuture]] = deque()
 
-    async def send_task(self, task_input: TaskInput):
-        task_result = TaskFuture()
-
+    async def send_task(self, task_input: TaskInput, task_result: TaskFuture):
         async with self._condition:
             self._task_queue.append((task_input, task_result))
             self._condition.notify(1)
@@ -28,7 +26,4 @@ class TaskExchange(object):
 
     async def clear(self):
         async with self._condition:
-            while len(self._task_queue) > 0:
-                _, task_result = self._task_queue.popleft()
-                if not task_result.done():
-                    task_result.cancel()
+            self._task_queue.clear()

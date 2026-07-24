@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import BinaryIO, List, Optional
+from typing import TYPE_CHECKING, BinaryIO, List, Optional
 
 from eth_typing import ChecksumAddress
 
@@ -12,6 +12,9 @@ from crynux_server.models import (
     RelayTask,
     TaskError,
 )
+
+if TYPE_CHECKING:
+    from crynux_server.task.error_report import TaskErrorReport
 
 
 class Relay(ABC):
@@ -41,6 +44,9 @@ class Relay(ABC):
     async def report_task_error(
         self, task_id_commitment: bytes, task_error: TaskError
     ): ...
+
+    @abstractmethod
+    async def report_task_diagnostic(self, report: "TaskErrorReport"): ...
 
     @abstractmethod
     async def submit_task_score(self, task_id_commitment: bytes, score: bytes): ...
@@ -78,7 +84,13 @@ class Relay(ABC):
 
     @abstractmethod
     async def node_join(
-        self, network: str, gpu_name: str, gpu_vram: int, model_ids: List[str], version: str, staking_amount: int
+        self,
+        network: str,
+        gpu_name: str,
+        gpu_vram: int,
+        model_ids: List[str],
+        version: str,
+        staking_amount: int,
     ): ...
 
     @abstractmethod

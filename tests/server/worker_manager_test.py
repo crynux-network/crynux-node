@@ -4,12 +4,23 @@ from types import SimpleNamespace
 import pytest
 from anyio import sleep
 
-from crynux_server.models import (DownloadTaskInput, ErrorResult,
-                                  InferenceTaskInput, ModelConfig,
-                                  SuccessResult, TaskInput, TaskResult)
-from crynux_server.worker_manager import (TaskCancelled, TaskDownloadError,
-                                          TaskExecutionError, TaskInvalid,
-                                          WorkerManager)
+from crynux_server.models import (
+    DownloadTaskInput,
+    ErrorResult,
+    InferenceTaskInput,
+    ModelConfig,
+    SuccessResult,
+    TaskInput,
+    TaskResult,
+)
+from crynux_server.worker_manager import (
+    TaskCancelled,
+    TaskDownloadError,
+    TaskExecutionError,
+    TaskInvalid,
+    TaskCancellationType,
+    WorkerManager,
+)
 from crynux_server.worker_manager import manager as manager_module
 
 TASK_ID = "01" * 32
@@ -33,9 +44,7 @@ def make_task_result(status: str, traceback: str = "") -> TaskResult:
         result = SuccessResult(status="success")
     else:
         result = ErrorResult(status="error", traceback=traceback)
-    return TaskResult(
-        task_name="inference", task_id_commitment=TASK_ID, result=result
-    )
+    return TaskResult(task_name="inference", task_id_commitment=TASK_ID, result=result)
 
 
 def make_worker_manager(monkeypatch, role="inference"):
@@ -117,23 +126,24 @@ async def test_success_result_does_not_restart_worker(worker_manager):
 
 async def test_watchdog_restarts_worker_on_missed_deadline(worker_manager):
     worker_id = await worker_manager.connect("1.0.0")
-    fut = await worker_manager.send_task(
-        make_task_input(), deadline=time.time() + 0.1
-    )
+    fut = await worker_manager.send_task(make_task_input(), deadline=time.time() + 0.1)
     await worker_manager.get_task(worker_id)
 
     await sleep(0.5)
     assert worker_manager.restart_calls == 1
     # The restart cancels the in-flight task future
-    with pytest.raises(TaskCancelled):
+    with pytest.raises(TaskCancelled) as exc_info:
         await fut.get()
+    assert (
+        exc_info.value.cancellation.cancellation_type
+        == TaskCancellationType.WORKER_TASK_TIMEOUT
+    )
+    assert exc_info.value.cancellation.phase.value == "dispatched"
 
 
 async def test_result_before_deadline_prevents_watchdog_restart(worker_manager):
     worker_id = await worker_manager.connect("1.0.0")
-    fut = await worker_manager.send_task(
-        make_task_input(), deadline=time.time() + 0.2
-    )
+    fut = await worker_manager.send_task(make_task_input(), deadline=time.time() + 0.2)
     await worker_manager.get_task(worker_id)
 
     await worker_manager.report_task_result(worker_id, make_task_result("success"))
@@ -145,16 +155,23 @@ async def test_result_before_deadline_prevents_watchdog_restart(worker_manager):
 
 async def test_locally_cancelled_future_still_restarts_at_deadline(worker_manager):
     worker_id = await worker_manager.connect("1.0.0")
-    fut = await worker_manager.send_task(
-        make_task_input(), deadline=time.time() + 0.5
-    )
+    fut = await worker_manager.send_task(make_task_input(), deadline=time.time() + 0.5)
     await worker_manager.get_task(worker_id)
 
     # A future cancelled from the caller side is not a worker-reported
     # result, so the watchdog entry stays
-    fut.cancel()
-    with pytest.raises(TaskCancelled):
+    fut.cancel(
+        TaskCancellationType.CALLER_CANCELLED,
+        "test",
+        "caller stopped waiting",
+    )
+    with pytest.raises(TaskCancelled) as exc_info:
         await fut.get()
+    assert (
+        exc_info.value.cancellation.cancellation_type
+        == TaskCancellationType.CALLER_CANCELLED
+    )
+    assert exc_info.value.cancellation.phase.value == "dispatched"
 
     await sleep(0.2)
     assert worker_manager.restart_calls == 0
@@ -168,7 +185,9 @@ async def test_model_not_downloaded_result_does_not_restart_worker(worker_manage
 
     await worker_manager.report_task_result(
         worker_id,
-        make_task_result("error", "sd_task.ModelNotDownloaded: Task model not downloaded"),
+        make_task_result(
+            "error", "sd_task.ModelNotDownloaded: Task model not downloaded"
+        ),
     )
     # The protocol path still sees an execution error
     with pytest.raises(TaskExecutionError):
@@ -188,7 +207,9 @@ async def test_download_manager_never_restarts_on_error_result(
                 task_name="download",
                 task_type=0,
                 task_id=TASK_ID,
-                model=ModelConfig(id="crynux-network/stable-diffusion-v1-5", type="base"),
+                model=ModelConfig(
+                    id="crynux-network/stable-diffusion-v1-5", type="base"
+                ),
             )
         )
     )
@@ -218,8 +239,13 @@ async def test_task_scoped_download_deadline_restarts_worker(
 
     await sleep(0.5)
     assert download_worker_manager.restart_calls == 1
-    with pytest.raises(TaskCancelled):
+    with pytest.raises(TaskCancelled) as exc_info:
         await fut.get()
+    assert (
+        exc_info.value.cancellation.cancellation_type
+        == TaskCancellationType.WORKER_TASK_TIMEOUT
+    )
+    assert exc_info.value.cancellation.phase.value == "dispatched"
 
 
 async def test_queued_task_scoped_download_is_cancelled_at_deadline(
@@ -232,8 +258,13 @@ async def test_queued_task_scoped_download_is_cancelled_at_deadline(
 
     await sleep(0.5)
     assert download_worker_manager.restart_calls == 1
-    with pytest.raises(TaskCancelled):
+    with pytest.raises(TaskCancelled) as exc_info:
         await fut.get()
+    assert (
+        exc_info.value.cancellation.cancellation_type
+        == TaskCancellationType.WORKER_TASK_TIMEOUT
+    )
+    assert exc_info.value.cancellation.phase.value == "queued"
 
 
 async def test_background_download_without_deadline_remains_unbounded(
@@ -250,9 +281,7 @@ async def test_background_download_without_deadline_remains_unbounded(
 
 async def test_restart_clears_watchdog_entries(worker_manager):
     worker_id = await worker_manager.connect("1.0.0")
-    fut = await worker_manager.send_task(
-        make_task_input(), deadline=time.time() + 0.1
-    )
+    fut = await worker_manager.send_task(make_task_input(), deadline=time.time() + 0.1)
     await worker_manager.get_task(worker_id)
 
     await sleep(0.5)
@@ -260,3 +289,46 @@ async def test_restart_clears_watchdog_entries(worker_manager):
     assert worker_manager.restart_calls == 1
     with pytest.raises(TaskCancelled):
         await fut.get()
+
+
+async def test_disconnect_carries_worker_and_phase_context(worker_manager):
+    worker_id, fut = await dispatch_task(worker_manager)
+    worker_manager.mark_task_sent(TASK_ID, worker_id)
+
+    await worker_manager.disconnect(worker_id)
+
+    with pytest.raises(TaskCancelled) as exc_info:
+        await fut.get()
+    cancellation = exc_info.value.cancellation
+    assert cancellation.cancellation_type == TaskCancellationType.WORKER_DISCONNECTED
+    assert cancellation.worker_id == worker_id
+    assert cancellation.phase.value == "sent"
+
+
+async def test_health_restart_marks_other_task_as_restarted(worker_manager):
+    _, fut = await dispatch_task(worker_manager)
+
+    await worker_manager.restart(reason="health recovery")
+
+    with pytest.raises(TaskCancelled) as exc_info:
+        await fut.get()
+    assert (
+        exc_info.value.cancellation.cancellation_type
+        == TaskCancellationType.WORKER_RESTARTED
+    )
+
+
+async def test_runner_sync_restart_has_distinct_cancellation(worker_manager):
+    _, fut = await dispatch_task(worker_manager)
+
+    await worker_manager.restart(
+        reason="runner version synchronization",
+        cancellation_type=TaskCancellationType.RUNNER_VERSION_SYNC,
+    )
+
+    with pytest.raises(TaskCancelled) as exc_info:
+        await fut.get()
+    assert (
+        exc_info.value.cancellation.cancellation_type
+        == TaskCancellationType.RUNNER_VERSION_SYNC
+    )

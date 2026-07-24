@@ -26,6 +26,7 @@ class MockRelay(Relay):
 
         self.task_results: Dict[bytes, List[str]] = {}
         self.task_result_checkpoint: Dict[bytes, str] = {}
+        self.task_diagnostics = []
 
         self._conditions: Dict[bytes, Condition] = {}
 
@@ -137,6 +138,9 @@ class MockRelay(Relay):
     async def get_task(self, task_id_commitment: bytes) -> RelayTask:
         with self.wrap_error("getTask"):
             return self.tasks[task_id_commitment]
+
+    async def report_task_diagnostic(self, report):
+        self.task_diagnostics.append(report)
 
     async def upload_task_result(
         self,

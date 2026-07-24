@@ -15,8 +15,14 @@ from crynux_server.config import Config, get_config, load_env_file
 from crynux_server.models import TaskInput, TaskResult
 from crynux_server.utils import get_selected_gpu_device_uuids
 
-from .error import (TaskDownloadError, TaskExecutionError, TaskInvalid,
-                    is_model_not_downloaded, is_task_invalid)
+from .error import (
+    TaskCancellationType,
+    TaskDownloadError,
+    TaskExecutionError,
+    TaskInvalid,
+    is_model_not_downloaded,
+    is_task_invalid,
+)
 from .exchange import TaskExchange
 from .task import TaskFuture
 from .utils import get_exe_head
@@ -116,7 +122,13 @@ class WorkerManager(object):
             output_dir = self.config.task_config.output_dir
             worker_pid_file = self.config.task_config.worker_pid_file
 
-            for dirname in [script_dir, hf_cache_dir, external_cache_dir, output_dir, os.path.dirname(worker_pid_file)]:
+            for dirname in [
+                script_dir,
+                hf_cache_dir,
+                external_cache_dir,
+                output_dir,
+                os.path.dirname(worker_pid_file),
+            ]:
                 os.makedirs(dirname, exist_ok=True)
         else:
             script_dir = ""
@@ -198,9 +210,7 @@ class WorkerManager(object):
         # GPT_EXECUTOR is injected only when tensor parallelism is effective
         # and force-removed otherwise, regardless of the .env contents. The
         # worker obeys the variable without re-checking the platform.
-        executor = utils.resolve_gpt_executor(
-            utils.get_platform(), len(device_uuids)
-        )
+        executor = utils.resolve_gpt_executor(utils.get_platform(), len(device_uuids))
         if executor == utils.GPT_EXECUTOR_TENSOR_PARALLEL:
             envs["GPT_EXECUTOR"] = utils.GPT_EXECUTOR_TENSOR_PARALLEL
         else:
@@ -218,7 +228,9 @@ class WorkerManager(object):
         self._worker_pid_file = worker_pid_file
 
         if p.poll() is not None:
-            raise RuntimeError(f"Worker process failed to start. Exit code: {p.returncode}")
+            raise RuntimeError(
+                f"Worker process failed to start. Exit code: {p.returncode}"
+            )
 
     def _stop_worker_process(self):
         if self._worker_process is not None:
@@ -237,13 +249,45 @@ class WorkerManager(object):
             if self._watchdog_task is not None:
                 self._watchdog_task.cancel()
                 self._watchdog_task = None
+            self._cancel_all_tasks(
+                TaskCancellationType.PROCESS_SHUTDOWN,
+                "worker_manager.start",
+                "the Node process is shutting down",
+            )
             self._stop_worker_process()
 
-    async def _clear_worker_connection(self):
+    def _cancel_all_tasks(
+        self,
+        cancellation_type: TaskCancellationType,
+        initiated_by: str,
+        reason: str,
+        timeout_task_ids: Optional[Set[str]] = None,
+    ):
+        timeout_task_ids = timeout_task_ids or set()
+        for task_id, task_result in self._task_futures.items():
+            if task_result.done():
+                continue
+            task_result.cancel(
+                (
+                    TaskCancellationType.WORKER_TASK_TIMEOUT
+                    if task_id in timeout_task_ids
+                    else cancellation_type
+                ),
+                initiated_by,
+                reason,
+            )
+
+    async def _clear_worker_connection(
+        self,
+        cancellation_type: TaskCancellationType,
+        initiated_by: str,
+        reason: str,
+        timeout_task_ids: Optional[Set[str]] = None,
+    ):
         await self._exchange.clear()
-        for task_result in self._task_futures.values():
-            if not task_result.done():
-                task_result.cancel()
+        self._cancel_all_tasks(
+            cancellation_type, initiated_by, reason, timeout_task_ids
+        )
         self._task_futures.clear()
         self._task_deadlines.clear()
 
@@ -252,17 +296,25 @@ class WorkerManager(object):
             self._version = None
             self._connect_condition.notify_all()
 
-    async def restart(self, reason: Optional[str] = None):
+    async def restart(
+        self,
+        reason: Optional[str] = None,
+        cancellation_type: TaskCancellationType = TaskCancellationType.WORKER_RESTARTED,
+        timeout_task_ids: Optional[Set[str]] = None,
+    ):
         async with self._restart_lock:
             if reason is None:
                 _logger.warning("Restarting %s worker process", self.role)
             else:
-                _logger.warning(
-                    "Restarting %s worker process: %s", self.role, reason
-                )
+                _logger.warning("Restarting %s worker process: %s", self.role, reason)
 
             self._stop_worker_process()
-            await self._clear_worker_connection()
+            await self._clear_worker_connection(
+                cancellation_type,
+                "worker_manager.restart",
+                reason or f"{self.role} worker process restarted",
+                timeout_task_ids,
+            )
             self._start_worker_process()
             _logger.info("Worker process restarted")
 
@@ -297,7 +349,11 @@ class WorkerManager(object):
         if worker_id != self._current_worker_id:
             _logger.info("Ignore stale worker %s disconnect", worker_id)
             return
-        await self._clear_worker_connection()
+        await self._clear_worker_connection(
+            TaskCancellationType.WORKER_DISCONNECTED,
+            "worker_websocket",
+            f"{self.role} worker {worker_id} disconnected before returning a result",
+        )
 
     async def is_connected(self) -> bool:
         return self._current_worker_id > 0
@@ -338,7 +394,8 @@ class WorkerManager(object):
                     reason=(
                         f"tasks {expired} produced no worker-reported result "
                         "by their execution deadline"
-                    )
+                    ),
+                    timeout_task_ids=set(expired),
                 )
 
     def _ensure_watchdog_running(self):
@@ -348,30 +405,37 @@ class WorkerManager(object):
             )
 
     async def send_task(self, input: TaskInput, deadline: Optional[float] = None):
+        task_id = input.task.task_id
+        task_result = TaskFuture(task_id, self.role, deadline)
+        self._task_futures[task_id] = task_result
         if deadline is not None:
-            self._task_deadlines[input.task.task_id] = deadline
+            self._task_deadlines[task_id] = deadline
             self._ensure_watchdog_running()
-        return await self._exchange.send_task(input)
+        return await self._exchange.send_task(input, task_result)
 
     async def get_task(self, worker_id: int):
         await sleep(0)
-        assert (
-            worker_id == self._current_worker_id
-        ), f"Worker {worker_id} is disconnected"
+        assert worker_id == self._current_worker_id, (
+            f"Worker {worker_id} is disconnected"
+        )
         task_input, task_future = await self._exchange.get_task()
-        task_id_commitment = task_input.task.task_id
-        self._task_futures[task_id_commitment] = task_future
+        task_future.mark_dispatched(worker_id)
 
         return task_input, task_future
 
+    def mark_task_sent(self, task_id: str, worker_id: int):
+        task_future = self._task_futures.get(task_id)
+        if task_future is not None and task_future.worker_id == worker_id:
+            task_future.mark_sent()
+
     async def report_task_result(self, worker_id: int, result: TaskResult):
-        assert (
-            worker_id == self._current_worker_id
-        ), f"Worker {worker_id} is disconnected"
+        assert worker_id == self._current_worker_id, (
+            f"Worker {worker_id} is disconnected"
+        )
         task_id_commitment = result.task_id_commitment
-        assert (
-            task_id_commitment in self._task_futures
-        ), f"No such task future {task_id_commitment}"
+        assert task_id_commitment in self._task_futures, (
+            f"No such task future {task_id_commitment}"
+        )
 
         # A worker-reported result is the only completion that clears
         # the watchdog entry besides a restart
@@ -412,6 +476,7 @@ class WorkerManager(object):
             self._spawn_restart(
                 reason=f"task {task_id_commitment} failed with an execution error"
             )
+
 
 _default_worker_managers: Dict[WorkerRole, WorkerManager] = {}
 
