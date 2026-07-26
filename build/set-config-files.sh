@@ -3,16 +3,22 @@
 # Check if blockchain argument is provided
 if [ $# -eq 0 ]; then
     echo "Error: No blockchain argument provided"
-    echo "Usage: $0 <blockchain> [task_error_report_automatic]"
+    echo "Usage: $0 <blockchain> [task_error_report_automatic] [tp_fallback]"
     exit 1
 fi
 
 # Get the blockchain argument
 blockchain=$1
 task_error_report_automatic=${2:-false}
+tp_fallback=${3:-device_map}
 
 if [[ "$task_error_report_automatic" != "true" && "$task_error_report_automatic" != "false" ]]; then
     echo "Error: task_error_report_automatic must be true or false"
+    exit 1
+fi
+
+if [[ "$tp_fallback" != "device_map" && "$tp_fallback" != "reduce_gpus" ]]; then
+    echo "Error: tp_fallback must be device_map or reduce_gpus"
     exit 1
 fi
 
@@ -55,6 +61,12 @@ docker_config="./build/docker/config.yml.example"
 sed -i -E "/^task_error_report:$/ { n; s/^([[:space:]]*automatic:).*/\1 ${task_error_report_automatic}/; }" "$docker_config"
 if ! grep -q "^  automatic: ${task_error_report_automatic}$" "$docker_config"; then
     echo "Error: Failed to configure task_error_report.automatic"
+    exit 1
+fi
+
+sed -i -E "s/^([[:space:]]*tp_fallback:).*/\1 ${tp_fallback}/" "$docker_config"
+if ! grep -q "^  tp_fallback: ${tp_fallback}$" "$docker_config"; then
+    echo "Error: Failed to configure task_config.tp_fallback"
     exit 1
 fi
 

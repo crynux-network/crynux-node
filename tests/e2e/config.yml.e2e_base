@@ -60,3 +60,7 @@ task_config:
 
   # URL of repository stores patch files of crynux worker
   worker_patch_url: https://raw.githubusercontent.com/crynux-network/crynux-worker/main
+
+  # Tensor parallel fallback when model dims are not divisible by GPU count
+  # device_map: classic layer sharding; reduce_gpus: use fewer GPUs that divide
+  tp_fallback: device_map

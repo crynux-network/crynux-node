@@ -210,12 +210,25 @@ class WorkerManager(object):
         # GPT_EXECUTOR is injected only when tensor parallelism is effective
         # and force-removed otherwise, regardless of the .env contents. The
         # worker obeys the variable without re-checking the platform.
+        # GPT_TP_FALLBACK is injected alongside GPT_EXECUTOR so gpt-task can
+        # resolve the TP fallback mode without reading the node config.
         executor = utils.resolve_gpt_executor(utils.get_platform(), len(device_uuids))
+        tp_fallback = (
+            self.config.task_config.tp_fallback
+            if self.config.task_config is not None
+            else "device_map"
+        )
         if executor == utils.GPT_EXECUTOR_TENSOR_PARALLEL:
             envs["GPT_EXECUTOR"] = utils.GPT_EXECUTOR_TENSOR_PARALLEL
+            envs["GPT_TP_FALLBACK"] = tp_fallback
         else:
             envs.pop("GPT_EXECUTOR", None)
-        _logger.info("Effective GPT executor mode: %s", executor)
+            envs.pop("GPT_TP_FALLBACK", None)
+        _logger.info(
+            "Effective GPT executor mode: %s, TP fallback: %s",
+            executor,
+            tp_fallback,
+        )
 
         return args, envs, worker_pid_file
 

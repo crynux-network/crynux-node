@@ -224,6 +224,8 @@ class TaskConfig(BaseModel):
 
     proxy: Optional[ProxyConfig] = None
 
+    tp_fallback: Literal["device_map", "reduce_gpus"] = "device_map"
+
     @computed_field
     @property
     def hf_cache_dir(self) -> str:

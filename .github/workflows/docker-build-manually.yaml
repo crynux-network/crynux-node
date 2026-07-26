@@ -19,6 +19,14 @@ on:
         required: true
         type: boolean
         default: false
+      tp_fallback:
+        description: 'Tensor parallel fallback when model dims are not divisible by GPU count'
+        required: true
+        type: choice
+        options:
+          - device_map
+          - reduce_gpus
+        default: device_map
 
 env:
   REGISTRY: ghcr.io
@@ -64,7 +72,7 @@ jobs:
       - name: Set the config files
         run: |
             chmod +x build/set-config-files.sh
-            ./build/set-config-files.sh ${{ inputs.blockchain }} ${{ inputs.task_error_report_automatic }}
+            ./build/set-config-files.sh ${{ inputs.blockchain }} ${{ inputs.task_error_report_automatic }} ${{ inputs.tp_fallback }}
 
       - name: Configure Docker storage
         shell: bash
