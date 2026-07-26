@@ -178,6 +178,10 @@ class WebRelay(Relay):
             "error_type": report.error_type,
             "message": report.message,
             "stack_trace": report.stack_trace,
+            "gpu_count": report.gpu_count,
+            "gpu_model": report.gpu_model,
+            "gpu_vram_mb": report.gpu_vram_mb,
+            "executor_mode": report.executor_mode,
         }
         timestamp, signature = self.signer.sign(signed_input)
         resp = await self.client.post(

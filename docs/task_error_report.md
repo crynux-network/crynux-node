@@ -80,7 +80,13 @@ Each diagnostic record MUST contain:
 - error type;
 - diagnostic message;
 - stack trace or no-traceback explanation;
+- selected worker GPU count;
+- selected worker GPU model name as reported by the Node aggregated GPU selection, without the executor marker;
+- per-card VRAM total of the selected worker GPUs, in MB, as a single integer;
+- worker executor mode at capture time: `tensor_parallel` or `device_map`;
 - Node capture time.
+
+The GPU count, model, and per-card VRAM MUST come from the same selected identical-model GPU group used for worker isolation. Because the selected cards are of one identical model, one per-card VRAM value describes every card. The executor mode MUST be the Node-effective worker mode resolved at capture time. It MUST NOT attempt to record a per-task TP-to-classic fallback that occurs inside gpt-task.
 
 Each failed execution attempt MUST produce at most one record for one Node and Task ID Commitment.
 
@@ -128,7 +134,7 @@ The Node MUST submit reports to:
 
 `POST /v2/tasks/:task_id_commitment/node_error`
 
-The request MUST be authorized by the existing Node address signature mechanism. The signature MUST cover the Node Address, Task ID Commitment, Task Args, error type, diagnostic message, and stack trace.
+The request MUST be authorized by the existing Node address signature mechanism. The signature MUST cover the Node Address, Task ID Commitment, Task Args, error type, diagnostic message, stack trace, GPU count, GPU model, per-card VRAM, and executor mode.
 
 Relay MUST verify:
 
@@ -157,7 +163,8 @@ The API MUST:
 - allow either filter, both filters, or no filter;
 - return paginated results;
 - order results from newest to oldest;
-- include complete Task Args and stack trace content.
+- include complete Task Args and stack trace content;
+- include GPU count, GPU model, per-card VRAM, and executor mode.
 
 ## Docker Build Configuration
 

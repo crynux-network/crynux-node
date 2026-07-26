@@ -11,10 +11,19 @@ from pydantic import BaseModel, model_validator
 
 from crynux_server.config import Config, get_config
 from crynux_server.relay.abc import Relay
+from crynux_server.utils import (
+    GPT_EXECUTOR_TENSOR_PARALLEL,
+    get_gpu_info,
+    get_platform,
+    resolve_gpt_executor,
+)
 
 _logger = logging.getLogger(__name__)
 
 REPORT_FILENAME = "task_error_reports.json"
+
+EXECUTOR_MODE_TENSOR_PARALLEL = "tensor_parallel"
+EXECUTOR_MODE_DEVICE_MAP = "device_map"
 
 
 class TaskErrorReport(BaseModel):
@@ -24,6 +33,10 @@ class TaskErrorReport(BaseModel):
     error_type: str
     message: str
     stack_trace: str
+    gpu_count: int = 0
+    gpu_model: str = ""
+    gpu_vram_mb: int = 0
+    executor_mode: str = EXECUTOR_MODE_DEVICE_MAP
     captured_at: int
 
     @model_validator(mode="before")
@@ -43,6 +56,34 @@ class TaskErrorReport(BaseModel):
                 migrated.pop("capture_time", None)
                 return migrated
         return data
+
+
+async def collect_worker_gpu_report_fields() -> tuple[int, str, int, str]:
+    """Collect the worker GPU count, model, per-card VRAM, and executor mode.
+
+    The selected worker GPUs are always of one identical model, so a single
+    per-card VRAM value describes every card. The executor mode is the
+    Node-effective worker mode at capture time: ``tensor_parallel`` or
+    ``device_map``. It does not record a per-task TP-to-classic fallback
+    that happens inside gpt-task.
+    """
+    try:
+        gpu_info = await get_gpu_info()
+    except Exception:
+        _logger.exception("Failed to collect GPU info for Task diagnostic")
+        return 0, "", 0, EXECUTOR_MODE_DEVICE_MAP
+
+    gpu_count = len(gpu_info.device_uuids)
+    if gpu_count == 0 and gpu_info.vram_total_mb > 0:
+        gpu_count = 1
+    gpu_vram_mb = gpu_info.vram_total_mb // gpu_count if gpu_count > 0 else 0
+
+    executor = resolve_gpt_executor(get_platform(), gpu_count)
+    if executor == GPT_EXECUTOR_TENSOR_PARALLEL:
+        executor_mode = EXECUTOR_MODE_TENSOR_PARALLEL
+    else:
+        executor_mode = EXECUTOR_MODE_DEVICE_MAP
+    return gpu_count, gpu_info.model, gpu_vram_mb, executor_mode
 
 
 class FlushResult(BaseModel):
@@ -150,6 +191,9 @@ class TaskErrorReporter:
         message: str,
         stack_trace: str,
     ) -> bool:
+        gpu_count, gpu_model, gpu_vram_mb, executor_mode = (
+            await collect_worker_gpu_report_fields()
+        )
         report = TaskErrorReport(
             node_address=str(self.relay.node_address),
             task_id_commitment="0x" + bytes(task_id_commitment).hex(),
@@ -157,6 +201,10 @@ class TaskErrorReporter:
             error_type=error_type,
             message=message,
             stack_trace=stack_trace,
+            gpu_count=gpu_count,
+            gpu_model=gpu_model,
+            gpu_vram_mb=gpu_vram_mb,
+            executor_mode=executor_mode,
             captured_at=int(datetime.now(timezone.utc).timestamp()),
         )
         created = await self.store.add(report)

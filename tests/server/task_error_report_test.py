@@ -17,6 +17,10 @@ def make_report(task_id: str) -> TaskErrorReport:
         error_type="TaskExecutionError",
         message="worker failed",
         stack_trace="original worker traceback",
+        gpu_count=2,
+        gpu_model="2x NVIDIA GeForce RTX 4090",
+        gpu_vram_mb=24564,
+        executor_mode="tensor_parallel",
         captured_at=1784851200,
     )
 
@@ -93,12 +97,20 @@ async def test_reporter_sends_one_at_a_time_and_retains_failed_record(tmp_path):
     assert (await store.list())[0].task_id_commitment == "0x02"
 
 
-async def test_capture_always_persists_when_automatic_disabled(tmp_path):
+async def test_capture_always_persists_when_automatic_disabled(tmp_path, monkeypatch):
     store = TaskErrorReportStore(str(tmp_path / "task_error_reports.json"))
     reporter = TaskErrorReporter(
         store,
         FakeRelay(),
         config=SimpleNamespace(task_error_report=SimpleNamespace(automatic=False)),
+    )
+
+    async def fake_gpu_fields():
+        return 2, "2x NVIDIA GeForce RTX 4090", 24564, "tensor_parallel"
+
+    monkeypatch.setattr(
+        "crynux_server.task.error_report.collect_worker_gpu_report_fields",
+        fake_gpu_fields,
     )
 
     assert await reporter.capture(
@@ -108,4 +120,9 @@ async def test_capture_always_persists_when_automatic_disabled(tmp_path):
         "invalid arguments",
         "original traceback",
     )
-    assert await store.count() == 1
+    reports = await store.list()
+    assert len(reports) == 1
+    assert reports[0].gpu_count == 2
+    assert reports[0].gpu_model == "2x NVIDIA GeForce RTX 4090"
+    assert reports[0].gpu_vram_mb == 24564
+    assert reports[0].executor_mode == "tensor_parallel"

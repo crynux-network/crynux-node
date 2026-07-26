@@ -12,7 +12,7 @@ def test_sign():
     assert signature == expected
 
 
-def test_node_task_error_six_field_golden_vector():
+def test_node_task_error_ten_field_golden_vector():
     signer = Signer(
         "0x420fcabfd5dbb55215490693062e6e530840c64de837d071f0d9da21aaac861e"
     )
@@ -23,12 +23,16 @@ def test_node_task_error_six_field_golden_vector():
         "error_type": "TaskExecutionError",
         "message": "worker failed",
         "stack_trace": "Traceback: boom",
+        "gpu_count": 2,
+        "gpu_model": "2x NVIDIA GeForce RTX 4090",
+        "gpu_vram_mb": 24564,
+        "executor_mode": "tensor_parallel",
     }
 
     timestamp, signature = signer.sign(input, timestamp=1784851234)
 
     assert timestamp == 1784851234
     assert signature == (
-        "0xd8d68035ca69ed86c90b76e6d44b01cc3ff559d8ab69b338c3f0c3f1a2b9894c"
-        "6bc45c82db8f118f2e604adb12624e0ab4c1c7e4b51c08c0d3830719753bc0af00"
+        "0xaa9547f4d769763dfb39d86f5cd199faa7c899788ab7175a3adc6aa60a32cc1b"
+        "528196c2d3a764748c99e977e66baa8706503576de45885215ce10185479528101"
     )

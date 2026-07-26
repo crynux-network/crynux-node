@@ -72,6 +72,10 @@ async def test_task_diagnostic_request_contains_signed_fields():
         error_type="TaskExecutionError",
         message="worker failed",
         stack_trace="original traceback",
+        gpu_count=2,
+        gpu_model="2x NVIDIA GeForce RTX 4090",
+        gpu_vram_mb=24564,
+        executor_mode="tensor_parallel",
         captured_at=1784851200,
     )
     signed_input = None
@@ -97,6 +101,10 @@ async def test_task_diagnostic_request_contains_signed_fields():
         "error_type": report.error_type,
         "message": report.message,
         "stack_trace": report.stack_trace,
+        "gpu_count": report.gpu_count,
+        "gpu_model": report.gpu_model,
+        "gpu_vram_mb": report.gpu_vram_mb,
+        "executor_mode": report.executor_mode,
     }
     for field in (
         "node_address",
@@ -105,6 +113,10 @@ async def test_task_diagnostic_request_contains_signed_fields():
         "error_type",
         "message",
         "stack_trace",
+        "gpu_count",
+        "gpu_model",
+        "gpu_vram_mb",
+        "executor_mode",
         "captured_at",
         "timestamp",
         "signature",
