@@ -94,6 +94,15 @@ class Relay(ABC):
     ): ...
 
     @abstractmethod
+    async def node_sync_capabilities(
+        self,
+        gpu_name: str,
+        gpu_vram: int,
+        model_ids: List[str],
+        version: str,
+    ): ...
+
+    @abstractmethod
     async def node_report_model_downloaded(self, model_id: str): ...
 
     @abstractmethod

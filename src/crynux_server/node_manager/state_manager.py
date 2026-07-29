@@ -248,6 +248,18 @@ class NodeStateManager(object):
             staking_amount, value=stake_value, option=option
         )
 
+    async def _sync_capabilities(
+        self, gpu_name: str, gpu_vram: int, version: List[int]
+    ):
+        download_models = await self.download_model_cache.load_all()
+        model_ids = [model.model.to_model_id() for model in download_models]
+        await self.relay.node_sync_capabilities(
+            gpu_name=gpu_name,
+            gpu_vram=gpu_vram,
+            version=".".join(str(v) for v in version),
+            model_ids=model_ids,
+        )
+
     async def try_start(
         self,
         gpu_name: str,
@@ -270,6 +282,7 @@ class NodeStateManager(object):
             ]:
                 _logger.info("Node has joined in the network.")
                 await self.state_cache.set_node_state(status)
+                await self._sync_capabilities(gpu_name, gpu_vram, version)
                 return
 
             elif status == models.NodeStatus.Stopped:
@@ -310,6 +323,7 @@ class NodeStateManager(object):
                 ):
                     await self.relay.node_resume()
                     await self._wait_for_running()
+                    await self._sync_capabilities(gpu_name, gpu_vram, version)
 
             _logger.info("Node joins in the network successfully.")
 

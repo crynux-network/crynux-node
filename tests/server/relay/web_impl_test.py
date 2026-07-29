@@ -156,3 +156,51 @@ async def test_get_balance_uses_v2_signature_authorization():
         "signature": "0x" + "01" * 65,
     }
     assert signed_input == {"address": relay.node_address}
+
+
+async def test_node_sync_capabilities_reports_complete_signed_inventory():
+    captured = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured
+        captured = request
+        return httpx.Response(200, json={"message": "success"})
+
+    relay = make_relay(handler)
+    signed_input = None
+
+    def sign(input, timestamp=None):
+        nonlocal signed_input
+        signed_input = input
+        return 1784851234, "0x" + "01" * 65
+
+    relay.signer.sign = sign
+    model_ids = ["base:model-a", "lora:model-b"]
+    try:
+        await relay.node_sync_capabilities(
+            gpu_name="2x NVIDIA GeForce RTX 4090 TP+docker",
+            gpu_vram=48,
+            model_ids=model_ids,
+            version="3.2.0",
+        )
+    finally:
+        await relay.client.aclose()
+
+    assert captured is not None
+    assert captured.url.path == f"/v2/node/{relay.node_address}/capabilities"
+    assert signed_input == {
+        "address": relay.node_address,
+        "gpu_name": "2x NVIDIA GeForce RTX 4090 TP+docker",
+        "gpu_vram": 48,
+        "model_ids": model_ids,
+        "version": "3.2.0",
+    }
+    body = json.loads(captured.content)
+    assert body == {
+        "gpu_name": "2x NVIDIA GeForce RTX 4090 TP+docker",
+        "gpu_vram": 48,
+        "model_ids": model_ids,
+        "version": "3.2.0",
+        "timestamp": 1784851234,
+        "signature": "0x" + "01" * 65,
+    }

@@ -58,6 +58,8 @@ When the effective executor mode is `tensor_parallel`, a ` TP` marker is appende
 
 The aggregated name and summed VRAM flow unchanged into these composition sites. The relay treats the aggregate name as a distinct GPU type in its existing matching tuple; no relay-side changes exist.
 
+When startup finds that the node address remains joined and therefore does not perform a new join, the node MUST send one authenticated capability synchronization after reading the current GPU and local model cache. The synchronization MUST report the current aggregated GPU name with executor marker and platform suffix, summed VRAM, full on-disk model ID set, and runner version. The same synchronization MUST run after startup resumes a paused node. A fresh join MUST NOT send a redundant capability synchronization.
+
 ## Worker Isolation
 
 The reported card set and the executed card set MUST be identical for reporting and worker isolation. At worker process spawn, the worker manager enumerates GPUs with the same selection rule and sets `CUDA_VISIBLE_DEVICES` in the worker environment to the comma-joined device UUIDs of the selected group. Cards excluded by the selection rule are invisible to the worker process, so neither `device_map="auto"` nor the tensor parallel rank group can place computation on cards outside the selected group. Under `tp_fallback: device_map`, the tensor parallel rank count equals the visible GPU count when a task runs under TP. Under `tp_fallback: reduce_gpus`, a task MAY run with a smaller TP world size K that divides the model dimensions; unused visible GPUs remain idle for that task and MUST NOT be used by other tasks.

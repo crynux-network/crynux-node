@@ -349,6 +349,31 @@ class WebRelay(Relay):
         resp = _process_resp(resp, "nodeJoin")
 
     @_web_relay_restart_pool_error
+    async def node_sync_capabilities(
+        self, gpu_name: str, gpu_vram: int, model_ids: List[str], version: str
+    ):
+        input = {
+            "address": self.node_address,
+            "gpu_name": gpu_name,
+            "gpu_vram": gpu_vram,
+            "model_ids": model_ids,
+            "version": version,
+        }
+        timestamp, signature = self.signer.sign(input)
+        resp = await self.client.post(
+            f"/v2/node/{self.node_address}/capabilities",
+            json={
+                "gpu_name": gpu_name,
+                "gpu_vram": gpu_vram,
+                "model_ids": model_ids,
+                "version": version,
+                "timestamp": timestamp,
+                "signature": signature,
+            },
+        )
+        _process_resp(resp, "nodeSyncCapabilities")
+
+    @_web_relay_restart_pool_error
     async def node_report_model_downloaded(self, model_id: str):
         input = {"address": self.node_address, "model_id": model_id}
         timestamp, signature = self.signer.sign(input)
