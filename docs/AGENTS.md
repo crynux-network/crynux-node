@@ -10,6 +10,14 @@
 - `runner-dynamic-update.md`: How the runner version is determined and dynamically updated: the worker patch update loop, which files are patched, and how the updated version is reported to the WebUI.
 - `multi-gpu.md`: How the node supports multiple GPUs: the layer-sharding execution model, the identical-model group selection rule, aggregated `<N>x <model>` reporting with summed VRAM, worker isolation via `CUDA_VISIBLE_DEVICES` UUID injection, tensor-parallel fallback modes (`device_map` and `reduce_gpus`), and the determinism constraints including the CPU/disk offload prohibition.
 
+## Model Compatibility Authority
+
+The longitudinal OpenAI-compatible flow, canonical task ownership boundaries, public response normalization, and OpenAI-to-task tool-history adaptation, including `function.arguments` representation conversion, MUST use `crynux-bridge/docs/model-compatibility/` in the standalone Bridge repository as their authority.
+
+Prompt rendering, chat templates, processor behavior, the model-input requirements for tools and tool history after task delivery, thinking template controls, AutoClass, remote `auto_map`, execution backends, tensor-parallel fallback, generation, and raw decoding MUST use `gpt-task/docs/model-compatibility/` in the standalone gpt-task repository as their authority.
+
+Node documentation MUST retain Node-owned task transport, worker management, GPU selection, executor configuration, reporting, and lifecycle protocols. It MUST NOT duplicate or redefine Bridge API adaptation or gpt-task execution facts. Model pages MUST NOT be implemented as Node runtime model-ID allowlists.
+
 ## Doc Update Requirements
 
 When updating documentation files:
