@@ -44,13 +44,6 @@ const minStakingAmountCNX = computed(() => {
     }
 })
 
-const stakingAmountHelp = computed(() => {
-    if (minStakingAmountLoadError.value) return minStakingAmountLoadError.value
-    if (minStakingAmountCNX.value === null) return 'Loading minimum staking amount from chain.'
-    if (isStakingAmountValid.value) return `Minimum staking amount is ${minStakingAmountCNX.value} CNX.`
-    return `Staking amount must be an integer and cannot be less than ${minStakingAmountCNX.value}.`
-})
-
 const isStakingAmountValid = computed(() => {
     if (typeof settingsInModal.staking_amount !== 'number') {
         return false
@@ -63,6 +56,54 @@ const isStakingAmountValid = computed(() => {
     }
     return settingsInModal.staking_amount >= minStakingAmountCNX.value
 })
+
+const stakingAmountValidateStatus = computed(() => {
+    if (minStakingAmountLoadError.value) return 'error'
+    // While the chain minimum is still loading, do not treat the field as invalid.
+    if (minStakingAmountCNX.value === null) return ''
+    if (isStakingAmountValid.value) return ''
+    return 'error'
+})
+
+const stakingAmountHelp = computed(() => {
+    if (minStakingAmountLoadError.value) return minStakingAmountLoadError.value
+    if (minStakingAmountCNX.value === null) return 'Loading minimum staking amount from chain.'
+    if (isStakingAmountValid.value) return `Minimum staking amount is ${minStakingAmountCNX.value} CNX.`
+    return `Staking amount must be an integer and cannot be less than ${minStakingAmountCNX.value}.`
+})
+
+// Max stakeable from wallet balance: use the integer part and leave the fractional
+// part for gas. If the fractional part is below 0.01 CNX, reserve 1 CNX instead.
+const maxStakeableFromBalanceCNX = computed(() => {
+    try {
+        const balance = BigInt(accountStatus.balance || 0)
+        const integerPart = Number(balance / ETHER_WEI)
+        const fractionalWei = balance % ETHER_WEI
+        const dustThresholdWei = ETHER_WEI / 100n
+        if (fractionalWei < dustThresholdWei) {
+            return Math.max(0, integerPart - 1)
+        }
+        return integerPart
+    } catch (e) {
+        return 0
+    }
+})
+
+const stakingSliderMin = computed(() => minStakingAmountCNX.value ?? 0)
+
+const stakingSliderMax = computed(() => {
+    const currentStakedInteger = (() => {
+        try {
+            return Number(BigInt(accountStatus.staking || 0) / ETHER_WEI)
+        } catch (e) {
+            return 0
+        }
+    })()
+    // Current on-chain stake remains available as total staking; additional stake comes from wallet.
+    return Math.max(stakingSliderMin.value, maxStakeableFromBalanceCNX.value + currentStakedInteger)
+})
+
+const isStakingAmountDisabled = computed(() => minStakingAmountCNX.value === null)
 
 // Whether each field changed in Settings modal
 const isStakingChanged = computed(() => settingsInModal.staking_amount !== settings.staking_amount)
@@ -529,7 +570,6 @@ const handleTaskErrorReportFlush = async () => {
 }
 
 async function updateMinStakingAmount() {
-    minStakingAmountWei.value = null
     minStakingAmountLoadError.value = ''
     try {
         const minStakingAmountResp = await settingsAPI.getMinStakingAmount()
@@ -1739,10 +1779,24 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
         <a-form layout="vertical">
             <a-form-item
                 label="Staking Amount"
-                :validate-status="isStakingAmountValid ? '' : 'error'"
+                :validate-status="stakingAmountValidateStatus"
                 :help="stakingAmountHelp"
             >
-                <a-input-number v-model:value="settingsInModal.staking_amount" prefix="CNX" style="width: 100%"/>
+                <a-input-number
+                    v-model:value="settingsInModal.staking_amount"
+                    prefix="CNX"
+                    style="width: 100%"
+                    :step="1"
+                    :precision="0"
+                    :disabled="isStakingAmountDisabled"
+                />
+                <a-slider
+                    v-model:value="settingsInModal.staking_amount"
+                    :min="stakingSliderMin"
+                    :max="stakingSliderMax"
+                    :step="1"
+                    :disabled="isStakingAmountDisabled"
+                />
             </a-form-item>
             <a-form-item>
                 <template #label>
