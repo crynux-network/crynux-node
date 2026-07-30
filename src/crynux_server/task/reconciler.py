@@ -272,6 +272,7 @@ class TaskReconciler(object):
                 "TaskInvalid",
                 "Worker rejected invalid Task arguments",
                 e.msg,
+                gpu_count=e.gpu_count,
             )
         except TaskCancelled as e:
             _logger.error(f"Task {task_id_hex} execution is cancelled")
@@ -302,6 +303,7 @@ class TaskReconciler(object):
                     error_type,
                     message,
                     stack_trace,
+                    gpu_count=download_error.gpu_count,
                 )
             else:
                 error_type = "TaskExecutionError"
@@ -313,6 +315,7 @@ class TaskReconciler(object):
                     error_type,
                     message,
                     stack_trace,
+                    gpu_count=e.gpu_count,
                 )
         except Exception as e:
             _logger.exception(e)
@@ -333,12 +336,18 @@ class TaskReconciler(object):
         error_type: str,
         message: str,
         stack_trace: str,
+        gpu_count: int = 0,
     ):
         if self.error_reporter is None:
             return
         try:
             await self.error_reporter.capture(
-                task_id, task_args, error_type, message, stack_trace
+                task_id,
+                task_args,
+                error_type,
+                message,
+                stack_trace,
+                gpu_count=gpu_count,
             )
         except Exception:
             _logger.exception(

@@ -168,7 +168,9 @@ class FakeErrorReporter:
     def __init__(self):
         self.reports = []
 
-    async def capture(self, task_id, task_args, error_type, message, stack_trace):
+    async def capture(
+        self, task_id, task_args, error_type, message, stack_trace, gpu_count=0
+    ):
         self.reports.append(
             {
                 "task_id": task_id,
@@ -176,6 +178,7 @@ class FakeErrorReporter:
                 "error_type": error_type,
                 "message": message,
                 "stack_trace": stack_trace,
+                "gpu_count": gpu_count,
             }
         )
         return True
@@ -270,7 +273,7 @@ async def test_worker_traceback_is_preserved_in_diagnostic():
     relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
     worker_traceback = "Traceback (most recent call last):\nworker.py:1\nCUDA error"
     reconciler = make_reconciler(
-        relay, worker_result=TaskExecutionError(worker_traceback)
+        relay, worker_result=TaskExecutionError(worker_traceback, gpu_count=2)
     )
     reporter = FakeErrorReporter()
     reconciler.error_reporter = reporter
@@ -279,6 +282,7 @@ async def test_worker_traceback_is_preserved_in_diagnostic():
 
     assert reporter.reports[0]["error_type"] == "TaskExecutionError"
     assert reporter.reports[0]["stack_trace"] == worker_traceback
+    assert reporter.reports[0]["gpu_count"] == 2
     assert relay.calls["report_task_error"] == 0
 
 
@@ -329,6 +333,7 @@ async def test_reasoned_cancellation_reports_timeout_context():
 
     report = reporter.reports[0]
     assert report["error_type"] == "WorkerTaskTimeout"
+    assert report["gpu_count"] == 0
     assert "Task phase: sent" in report["stack_trace"]
     assert "No Worker result was received" in report["stack_trace"]
 

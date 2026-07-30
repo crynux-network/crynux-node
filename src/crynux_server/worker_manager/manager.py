@@ -465,13 +465,18 @@ class WorkerManager(object):
                     fut.set_result(None)
                 elif result.result.status == "error":
                     err_msg = result.result.traceback
+                    gpu_count = result.result.gpu_count
                     if result.task_name == "inference":
                         if is_task_invalid(err_msg):
-                            fut.set_error(TaskInvalid(err_msg))
+                            fut.set_error(TaskInvalid(err_msg, gpu_count=gpu_count))
                         else:
-                            fut.set_error(TaskExecutionError(err_msg))
+                            fut.set_error(
+                                TaskExecutionError(err_msg, gpu_count=gpu_count)
+                            )
                     elif result.task_name == "download":
-                        fut.set_error(TaskDownloadError(err_msg))
+                        fut.set_error(
+                            TaskDownloadError(err_msg, gpu_count=gpu_count)
+                        )
         finally:
             if fut.done():
                 del self._task_futures[task_id_commitment]

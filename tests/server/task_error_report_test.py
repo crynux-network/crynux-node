@@ -106,7 +106,7 @@ async def test_capture_always_persists_when_automatic_disabled(tmp_path, monkeyp
     )
 
     async def fake_gpu_fields():
-        return 2, "2x NVIDIA GeForce RTX 4090", 24564, "tensor_parallel"
+        return "2x NVIDIA GeForce RTX 4090", 24564, "tensor_parallel"
 
     monkeypatch.setattr(
         "crynux_server.task.error_report.collect_worker_gpu_report_fields",
@@ -119,6 +119,7 @@ async def test_capture_always_persists_when_automatic_disabled(tmp_path, monkeyp
         "TaskInvalid",
         "invalid arguments",
         "original traceback",
+        gpu_count=2,
     )
     reports = await store.list()
     assert len(reports) == 1
@@ -126,3 +127,32 @@ async def test_capture_always_persists_when_automatic_disabled(tmp_path, monkeyp
     assert reports[0].gpu_model == "2x NVIDIA GeForce RTX 4090"
     assert reports[0].gpu_vram_mb == 24564
     assert reports[0].executor_mode == "tensor_parallel"
+
+
+async def test_capture_uses_zero_gpu_count_without_worker_value(tmp_path, monkeypatch):
+    store = TaskErrorReportStore(str(tmp_path / "task_error_reports.json"))
+    reporter = TaskErrorReporter(
+        store,
+        FakeRelay(),
+        config=SimpleNamespace(task_error_report=SimpleNamespace(automatic=False)),
+    )
+
+    async def fake_gpu_fields():
+        return "2x NVIDIA GeForce RTX 4090", 24564, "tensor_parallel"
+
+    monkeypatch.setattr(
+        "crynux_server.task.error_report.collect_worker_gpu_report_fields",
+        fake_gpu_fields,
+    )
+
+    assert await reporter.capture(
+        bytes.fromhex("02" * 32),
+        '{"prompt":"test"}',
+        "WorkerTaskTimeout",
+        "timeout",
+        "no worker traceback",
+    )
+    reports = await store.list()
+    assert len(reports) == 1
+    assert reports[0].gpu_count == 0
+    assert reports[0].gpu_model == "2x NVIDIA GeForce RTX 4090"

@@ -80,13 +80,20 @@ Each diagnostic record MUST contain:
 - error type;
 - diagnostic message;
 - stack trace or no-traceback explanation;
-- selected worker GPU count;
+- GPU count actually used to execute the failed Task;
 - selected worker GPU model name as reported by the Node aggregated GPU selection, without the executor marker;
 - per-card VRAM total of the selected worker GPUs, in MB, as a single integer;
 - worker executor mode at capture time: `tensor_parallel` or `device_map`;
 - Node capture time.
 
-The GPU count, model, and per-card VRAM MUST come from the same selected identical-model GPU group used for worker isolation. Because the selected cards are of one identical model, one per-card VRAM value describes every card. The executor mode MUST be the Node-effective worker mode resolved at capture time. It MUST NOT attempt to record a per-task TP-to-classic fallback that occurs inside gpt-task.
+The GPU count MUST report the number of GPUs that actually executed the failed Task:
+
+- When the Worker returns an error result, the GPU count MUST be the value carried on that result.
+- For a tensor-parallel GPT Task, that value MUST be the final TP world size, including any reduction performed under `reduce_gpus`.
+- For classic GPT execution, SD Tasks, download Tasks, and any other non-TP path, that value MUST be the Worker visible GPU count.
+- When no Worker result is available (`WorkerTaskTimeout`, `WorkerDisconnected`, Node-side interruption without a Worker result, or a legacy Worker that omits the field), the GPU count MUST be `0`.
+
+The GPU model and per-card VRAM MUST come from the same selected identical-model GPU group used for worker isolation. Because the selected cards are of one identical model, one per-card VRAM value describes every card. The executor mode MUST be the Node-effective worker mode resolved at capture time.
 
 Each failed execution attempt MUST produce at most one record for one Node and Task ID Commitment.
 

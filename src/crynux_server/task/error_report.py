@@ -58,20 +58,21 @@ class TaskErrorReport(BaseModel):
         return data
 
 
-async def collect_worker_gpu_report_fields() -> tuple[int, str, int, str]:
-    """Collect the worker GPU count, model, per-card VRAM, and executor mode.
+async def collect_worker_gpu_report_fields() -> tuple[str, int, str]:
+    """Collect worker GPU model, per-card VRAM, and executor mode.
 
     The selected worker GPUs are always of one identical model, so a single
     per-card VRAM value describes every card. The executor mode is the
-    Node-effective worker mode at capture time: ``tensor_parallel`` or
-    ``device_map``. It does not record a per-task TP-to-classic fallback
-    that happens inside gpt-task.
+    Node-effective worker mode resolved at capture time: ``tensor_parallel``
+    or ``device_map``. The report ``gpu_count`` field is supplied separately
+    from the Worker result (executed card count) or ``0`` when no Worker
+    result is available.
     """
     try:
         gpu_info = await get_gpu_info()
     except Exception:
         _logger.exception("Failed to collect GPU info for Task diagnostic")
-        return 0, "", 0, EXECUTOR_MODE_DEVICE_MAP
+        return "", 0, EXECUTOR_MODE_DEVICE_MAP
 
     gpu_count = len(gpu_info.device_uuids)
     if gpu_count == 0 and gpu_info.vram_total_mb > 0:
@@ -83,7 +84,7 @@ async def collect_worker_gpu_report_fields() -> tuple[int, str, int, str]:
         executor_mode = EXECUTOR_MODE_TENSOR_PARALLEL
     else:
         executor_mode = EXECUTOR_MODE_DEVICE_MAP
-    return gpu_count, gpu_info.model, gpu_vram_mb, executor_mode
+    return gpu_info.model, gpu_vram_mb, executor_mode
 
 
 class FlushResult(BaseModel):
@@ -190,8 +191,9 @@ class TaskErrorReporter:
         error_type: str,
         message: str,
         stack_trace: str,
+        gpu_count: int = 0,
     ) -> bool:
-        gpu_count, gpu_model, gpu_vram_mb, executor_mode = (
+        gpu_model, gpu_vram_mb, executor_mode = (
             await collect_worker_gpu_report_fields()
         )
         report = TaskErrorReport(

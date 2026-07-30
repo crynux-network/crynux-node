@@ -33,6 +33,9 @@ class SuccessResult(BaseModel):
 class ErrorResult(BaseModel):
     status: Literal["error"]
     traceback: str
+    # GPUs actually used for this failed task. Absent/0 means the Worker did
+    # not report an executed count (legacy workers or no-result cancellations).
+    gpu_count: int = 0
 
 
 class TaskResult(BaseModel):

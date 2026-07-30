@@ -72,8 +72,9 @@ class TaskCancelled(Exception):
 class TaskError(Exception):
     error_type = "TaskError"
 
-    def __init__(self, msg: str):
+    def __init__(self, msg: str, gpu_count: int = 0):
         self.msg = msg
+        self.gpu_count = gpu_count
 
     def __str__(self) -> str:
         return f"{self.error_type}, error msg:\n{self.msg}\n"
