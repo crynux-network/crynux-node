@@ -25,6 +25,8 @@ When the effective mode is `tensor_parallel`, the node injects `GPT_EXECUTOR=ten
 
 The worker MUST dispatch GPT tasks to gpt-task `run_task_tp` when the Node injects `GPT_EXECUTOR=tensor_parallel`. gpt-task MUST own per-task capability resolution, AutoClass selection, plan validation, rank lifecycle, input processing, caching, and classic fallback.
 
+The inference worker's task coordinator MUST keep exactly one GPU-resident model owner at a time: the worker-level ModelCache used by SD and classic LLM, or the gpt-task TP rank-group shard cache. Consecutive compatible tasks on the same backend MAY reuse that backend's cache. Before dispatching SD inference, SD fine-tuning, or direct classic LLM execution, the coordinator MUST shut down any live TP rank group. Before TP loading, the worker-level classic or SD cache MUST clear. Before SD fine-tuning, the coordinator MUST also clear the worker-level cache because fine-tuning loads outside ModelCache. Individual SD and classic runners MUST NOT manage another backend's cache lifecycle.
+
 The node-owned `task_config.tp_fallback` value MUST select the fallback policy passed to gpt-task:
 
 - `device_map` (default): fall back to the classic `run_task` path with `device_map="auto"`.
