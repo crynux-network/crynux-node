@@ -4,7 +4,12 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .common import AddressFromStr, BytesFromHex
-from .task import InferenceTaskStatus, TaskAbortReason, TaskError, TaskType
+from .task import (
+    InferenceTaskStatus,
+    SoftTaskAbortReason,
+    TaskError,
+    TaskType,
+)
 
 EventType = Literal[
     "TaskStarted",
@@ -84,7 +89,7 @@ class TaskEndAborted(Event):
     task_id_commitment: BytesFromHex
     abort_issuer: AddressFromStr
     last_status: InferenceTaskStatus
-    abort_reason: TaskAbortReason
+    abort_reason: SoftTaskAbortReason
 
 
 class TaskEndSuccess(Event):

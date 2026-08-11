@@ -35,6 +35,7 @@ The `EventWatcher` (`src/crynux_server/watcher/watcher.py`) implements the consu
 - The watcher fetches events every second, filtered by the node's own address, and advances the in-memory cursor to the last delivered event id. The cursor is not persisted.
 - Fetched events are dispatched to registered event filters. Each event is processed by all matching filters before the next event is processed. A callback exception is logged and swallowed; it does not stop the watcher.
 - If the watcher loop fails, the node manager restarts it with the same watcher instance, preserving the cursor. Within one node process lifetime, no event in the cursor range is skipped.
+- When parsing event payloads, fields that are not required for node runtime behavior MUST tolerate unrecognized enum values without failing the fetch or stalling the cursor. `TaskEndAborted.abort_reason` is such a field: an unrecognized value MUST be ignored by mapping it to `TaskAbortReason.NONE`. The node MUST NOT use `abort_reason` to drive inference task actions.
 
 ### Delivery guarantees
 

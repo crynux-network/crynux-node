@@ -1,10 +1,13 @@
+import logging
 from datetime import datetime
 from enum import IntEnum
-from typing import List, Optional
+from typing import Annotated, Any, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, BeforeValidator
 
 from .common import AddressFromStr, BytesFromHex, WeiFromStr
+
+_logger = logging.getLogger(__name__)
 
 
 class TaskType(IntEnum):
@@ -24,6 +27,19 @@ class TaskAbortReason(IntEnum):
     ModelDownloadFailed = 2
     IncorrectResult = 3
     TaskFeeTooLow = 4
+
+
+def soft_task_abort_reason(value: Any) -> TaskAbortReason:
+    try:
+        return TaskAbortReason(int(value))
+    except (ValueError, TypeError):
+        _logger.warning("Ignoring unrecognized TaskAbortReason value: %r", value)
+        return TaskAbortReason.NONE
+
+
+SoftTaskAbortReason = Annotated[
+    TaskAbortReason, BeforeValidator(soft_task_abort_reason)
+]
 
 
 class InferenceTaskStatus(IntEnum):
