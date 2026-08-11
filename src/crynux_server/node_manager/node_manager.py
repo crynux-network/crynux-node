@@ -78,7 +78,6 @@ async def _make_contracts(
     timeout: int,
     rps: int,
     benefit_address_contract_address: Optional[str],
-    credits_contract_address: Optional[str],
     delegated_staking_contract_address: Optional[str],
     node_staking_contract_address: Optional[str],
 ) -> Contracts:
@@ -87,7 +86,6 @@ async def _make_contracts(
     )
     await contracts.init(
         benefit_address_contract_address=benefit_address_contract_address,
-        credits_contract_address=credits_contract_address,
         delegated_staking_contract_address=delegated_staking_contract_address,
         node_staking_contract_address=node_staking_contract_address,
     )
@@ -249,7 +247,6 @@ class NodeManager(object):
                     timeout=self.config.ethereum.timeout,
                     rps=self.config.ethereum.rps,
                     benefit_address_contract_address=self.config.ethereum.contract.benefit_address,
-                    credits_contract_address=self.config.ethereum.contract.credits,
                     delegated_staking_contract_address=self.config.ethereum.contract.delegated_staking,
                     node_staking_contract_address=self.config.ethereum.contract.node_staking,
                 )
@@ -643,17 +640,11 @@ class NodeManager(object):
                     if node_info.status != models.ChainNodeStatus.QUIT:
                         return True
                     balance = await self._contracts.get_balance(self._contracts.account)
-                    credits = await self._contracts.credits_contract.get_credits(
-                        self._contracts.account
-                    )
                     if staking_info.status == models.ChainNodeStakingStatus.Staked:
-                        current_staking_amount = (
-                            staking_info.staked_balance + staking_info.staked_credits
-                        )
+                        current_staking_amount = staking_info.staked_balance
                     else:
                         current_staking_amount = 0
-                    total_balance = balance + credits
-                    if total_balance + current_staking_amount >= node_amount:
+                    if balance + current_staking_amount >= node_amount:
                         return True
                 except Exception as e:
                     _logger.exception(e)

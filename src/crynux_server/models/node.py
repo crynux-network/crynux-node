@@ -104,6 +104,5 @@ class ChainNodeStakingStatus(IntEnum):
 class ChainNodeStakingInfo(BaseModel):
     node_address: str
     staked_balance: int
-    staked_credits: int
     status: ChainNodeStakingStatus
     unstake_timestamp: int

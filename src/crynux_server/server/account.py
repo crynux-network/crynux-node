@@ -43,19 +43,14 @@ async def update_account_info(interval: int):
 
             async def _update_balance():
                 balance = await contracts.get_balance(contracts.account)
-                credits = await contracts.credits_contract.get_credits(
-                    contracts.account
-                )
-                _account_info.balance = str(balance + credits)
+                _account_info.balance = str(balance)
                 _logger.debug(f"balance: {_account_info.balance}")
 
             async def _update_staking():
                 staking_info = await contracts.node_staking_contract.get_staking_info(
                     contracts.account
                 )
-                _account_info.staking = str(
-                    staking_info.staked_balance + staking_info.staked_credits
-                )
+                _account_info.staking = str(staking_info.staked_balance)
                 _logger.debug(f"staking: {_account_info.staking}")
 
             async def _update_node_info():

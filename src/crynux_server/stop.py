@@ -46,7 +46,6 @@ async def _stop(
             )
             await contracts.init(
                 benefit_address_contract_address=config.ethereum.contract.benefit_address,
-                credits_contract_address=config.ethereum.contract.credits,
                 delegated_staking_contract_address=config.ethereum.contract.delegated_staking,
                 node_staking_contract_address=config.ethereum.contract.node_staking,
             )

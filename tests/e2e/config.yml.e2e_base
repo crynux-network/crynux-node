@@ -20,7 +20,6 @@ ethereum:
   # Contract addresses are replaced with e2e-specific values before build
   contract:
     benefit_address: "0xa4AC846337794C93d68D387Be77663e32AD415bb"
-    credits: "0xb592ee9c75873E13501e2eF1e2c31604C056f197"
     node_staking: "0xf76C3f19c8976d0Bc49d48718669b99747b1837e"
     delegated_staking: "0x4b0946BB12474332D865AfAc5F77554b503C5570"
 

@@ -133,9 +133,7 @@ class NodeStateManager(object):
                         self.contracts.account
                     )
                 )
-                current_staking_amount = (
-                    staking_info.staked_balance + staking_info.staked_credits
-                )
+                current_staking_amount = staking_info.staked_balance
                 while True:
                     staking_amount = Web3.to_wei(get_staking_amount(), "ether")
                     node_status = (await self.state_cache.get_node_state()).status
@@ -220,19 +218,13 @@ class NodeStateManager(object):
 
     async def _ensure_start_balance(self, staking_amount: int):
         balance = await self.contracts.get_balance(self.contracts.account)
-        credits = await self.contracts.credits_contract.get_credits(
-            self.contracts.account
-        )
-        total_balance = balance + credits
 
         staking_info = await self.contracts.node_staking_contract.get_staking_info(
             self.contracts.account
         )
-        current_staking_amount = (
-            staking_info.staked_balance + staking_info.staked_credits
-        )
+        current_staking_amount = staking_info.staked_balance
 
-        if total_balance + current_staking_amount < staking_amount + Web3.to_wei(
+        if balance + current_staking_amount < staking_amount + Web3.to_wei(
             0.001, "ether"
         ):
             raise ValueError("Node token balance is not enough to join")

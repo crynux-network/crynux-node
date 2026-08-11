@@ -19,20 +19,6 @@ class DelegatedStakingContract(ContractWrapper):
     ):
         super().__init__(w3_pool, "DelegatedStaking", contract_address)
 
-    async def set_parameter_controller(
-        self,
-        addr: ChecksumAddress,
-        *,
-        option: "Optional[TxOption]" = None,
-        w3: Optional[AsyncWeb3] = None,
-    ):
-        return await self._transaction_call(
-            "setParameterController",
-            addr=addr,
-            option=option,
-            w3=w3,
-        )
-
     async def set_admin_address(
         self,
         addr: ChecksumAddress,

@@ -20,7 +20,6 @@ ethereum:
   # The deployed addresses of the smart contracts
   contract:
     benefit_address: "0xf57a8f8F7ab52EBD7971A65e9B44C767d3119c4f"
-    credits: "0xdC54E16BB691C093264A58CcE1d5E357878b3D93"
     node_staking: "0xd20403b243b0109809BEAa93Ac38f0e3b30039C0"
     delegated_staking: "0x6463776672920939f8F637173F33C25Fa705f6D1"
 

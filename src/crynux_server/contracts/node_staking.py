@@ -21,20 +21,6 @@ class NodeStakingContract(ContractWrapper):
     ):
         super().__init__(w3_pool, "NodeStaking", contract_address)
 
-    async def set_parameter_controller(
-        self,
-        addr: ChecksumAddress,
-        *,
-        option: "Optional[TxOption]" = None,
-        w3: Optional[AsyncWeb3] = None,
-    ):
-        return await self._transaction_call(
-            "setParameterController",
-            addr=addr,
-            option=option,
-            w3=w3,
-        )
-
     async def set_admin_address(
         self,
         addr: ChecksumAddress,
@@ -100,9 +86,8 @@ class NodeStakingContract(ContractWrapper):
         return ChainNodeStakingInfo(
             node_address=res[0],
             staked_balance=res[1],
-            staked_credits=res[2],
-            status=ChainNodeStakingStatus(res[3]),
-            unstake_timestamp=res[4],
+            status=ChainNodeStakingStatus(res[2]),
+            unstake_timestamp=res[3],
         )
 
     async def get_all_node_addresses(

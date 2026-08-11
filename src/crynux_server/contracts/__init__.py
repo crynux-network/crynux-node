@@ -12,7 +12,7 @@ from web3.types import TxParams, TxReceipt, BlockIdentifier, BlockData
 
 from crynux_server.config import TxOption
 
-from . import benefit_address, credits, delegated_staking, node_staking
+from . import benefit_address, delegated_staking, node_staking
 from .exceptions import TxRevertedError
 from .utils import ContractWrapper, TxWaiter
 from .w3_pool import W3Pool
@@ -38,7 +38,6 @@ class ProviderType(IntEnum):
 
 class Contracts(object):
     benefit_address_contract: benefit_address.BenefitAddressContract
-    credits_contract: credits.CreditsContract
     delegated_staking_contract: delegated_staking.DelegatedStakingContract
     node_staking_contract: node_staking.NodeStakingContract
 
@@ -68,7 +67,6 @@ class Contracts(object):
 
     async def init(
         self,
-        credits_contract_address: Optional[str] = None,
         benefit_address_contract_address: Optional[str] = None,
         delegated_staking_contract_address: Optional[str] = None,
         node_staking_contract_address: Optional[str] = None,
@@ -82,8 +80,7 @@ class Contracts(object):
                 _logger.info(f"Wallet address is {w3.eth.default_account}")
 
                 if (
-                    credits_contract_address is None
-                    or benefit_address_contract_address is None
+                    benefit_address_contract_address is None
                     or delegated_staking_contract_address is None
                     or node_staking_contract_address is None
                 ):
@@ -94,10 +91,6 @@ class Contracts(object):
                         self._w3_pool,
                         w3.to_checksum_address(benefit_address_contract_address),
                     )
-                )
-
-                self.credits_contract = credits.CreditsContract(
-                    self._w3_pool, w3.to_checksum_address(credits_contract_address)
                 )
 
                 self.delegated_staking_contract = (
@@ -131,9 +124,7 @@ class Contracts(object):
         return await self.close()
 
     def get_contract(self, name: str):
-        if name == "credits":
-            return self.credits_contract
-        elif name == "node_staking":
+        if name == "node_staking":
             return self.node_staking_contract
         else:
             raise ValueError(f"unknown contract name {name}")
@@ -214,11 +205,10 @@ class Contracts(object):
         
     async def get_stake_tx_value(self, amount: int) -> Optional[int]:
         async with await self._w3_pool.get() as w3:
-            value = 0
             current_staking_info = await self.node_staking_contract.get_staking_info(
                 self._w3_pool.account, w3=w3
             )
-            current_staking_amount = current_staking_info.staked_balance + current_staking_info.staked_credits
+            current_staking_amount = current_staking_info.staked_balance
             if amount == current_staking_amount:
                 return None
 
@@ -229,12 +219,9 @@ class Contracts(object):
                 )
             
             if amount > current_staking_amount:
-                diff = amount - current_staking_amount
-                stakable_credits = await self.credits_contract.get_credits(self._w3_pool.account, w3=w3)
-                if stakable_credits < diff:
-                    value = diff - stakable_credits
+                return amount - current_staking_amount
 
-            return value
+            return 0
 
     async def stake(self, amount: int, *, option: "Optional[TxOption]" = None):
         value = await self.get_stake_tx_value(amount)

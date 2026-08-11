@@ -37,22 +37,22 @@ The WebUI treats `slashed` as a stopped-like state for controls:
 |-------------|-------------|
 | Node status card | MUST display the node as stopped-like. |
 | Start button | MUST be shown. |
-| Start button disabled state | MUST depend on whether the node wallet has enough total balance and current staking to cover configured staking amount plus minimum gas. |
+| Start button disabled state | MUST depend on whether the node wallet has enough native CNX balance and current staking to cover configured staking amount plus minimum gas. |
 | Stop, Pause, Resume buttons | MUST NOT be shown for `slashed`. |
 
 The slashed alert MUST NOT by itself block start. The backend start flow performs the authoritative checks.
 
-When local node state is `slashed` and the node wallet does not have enough total balance and current staking to cover the configured staking amount plus minimum gas, the WebUI MUST also show the insufficient-token alert.
+When local node state is `slashed` and the node wallet does not have enough native CNX balance and current staking to cover the configured staking amount plus minimum gas, the WebUI MUST also show the insufficient-token alert.
 
 ## Node Restart Behavior
 
 The local `slashed` state is persisted in the node database. A node manager restart overwrites it during startup.
 
-During startup, node manager MUST set local node state to `initializing`. It then checks Relay node status, chain staking state, node wallet balance, and credits.
+During startup, node manager MUST set local node state to `initializing`. It then checks Relay node status, chain staking state, and node wallet native CNX balance.
 
-If the node wallet does not have enough total balance and current staking to cover the configured staking amount plus minimum gas, node manager MUST set local node state to `stopped` and wait before joining. In this state the `Node was slashed` alert is not shown.
+If the node wallet does not have enough native CNX balance and current staking to cover the configured staking amount plus minimum gas, node manager MUST set local node state to `stopped` and wait before joining. In this state the `Node was slashed` alert is not shown.
 
-If the node wallet has enough total balance and current staking, node manager MUST continue into the join flow. A successful join MUST set local node state to `running`.
+If the node wallet has enough native CNX balance and current staking, node manager MUST continue into the join flow. A successful join MUST set local node state to `running`.
 
 ## Manual Start After Slash
 
@@ -63,7 +63,7 @@ The backend start flow MUST require Relay node status to map to local `stopped`.
 The backend start flow MUST also require:
 
 1. The previous local transaction state is not pending.
-2. The node wallet balance plus current staking amount is at least the configured staking amount plus `0.001` CNX for gas.
+2. The node wallet native CNX balance plus current staking amount is at least the configured staking amount plus `0.001` CNX for gas.
 3. The staking transaction succeeds or no staking transaction is required.
 4. Relay accepts `node_join`.
 5. Relay returns running node status after join.
