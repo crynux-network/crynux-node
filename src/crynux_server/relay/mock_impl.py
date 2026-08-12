@@ -203,6 +203,15 @@ class MockRelay(Relay):
     async def now(self) -> int:
         return int(time.time())
 
+    async def get_locked_vesting(self, address=None) -> int:
+        return 0
+
+    async def get_vesting_records(self, page: int = 1, page_size: int = 20, address=None):
+        return {"total": 0, "vesting_records": []}
+
+    async def get_qos_tracing(self):
+        return {"node_address": "", "max_task_events": 50, "events": []}
+
     async def close(self):
         if not self._closed:
             self.tasks = {}

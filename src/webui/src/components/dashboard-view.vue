@@ -11,6 +11,8 @@ import {
 } from '@ant-design/icons-vue'
 import { Grid, Modal } from 'ant-design-vue'
 import EditAccount from './edit-account.vue'
+import QosDiagnosticsModal from './qos-diagnostics-modal.vue'
+import EmissionsModal from './emissions-modal.vue'
 import GithubButton from 'vue-github-button'
 
 import SystemAPI from '../api/v1/system'
@@ -171,6 +173,8 @@ const settingsAPI = new SettingsAPI()
 const accountEditor = ref(null)
 const showCnxTokenModal = ref(false)
 const showWithdrawModal = ref(false)
+const showQosDiagnosticsModal = ref(false)
+const showEmissionsModal = ref(false)
 
 const topRow = ref(null)
 const alertsRow = ref(null)
@@ -217,6 +221,7 @@ const accountStatus = reactive({
     balance: 0,
     staking: 0,
     relay_balance: 0,
+    locked_emission: 0,
     delegator_staking: 0,
     delegator_share: 0,
     delegator_num: 0,
@@ -423,6 +428,14 @@ const relayBalance = computed(() => {
         return '0'
     } else {
         return toEtherValue(accountStatus.relay_balance)
+    }
+})
+
+const lockedEmission = computed(() => {
+    if (accountStatus.address === '') {
+        return '0'
+    } else {
+        return toEtherValue(accountStatus.locked_emission)
     }
 })
 
@@ -681,6 +694,7 @@ const updateAccountInfo = async (ticket) => {
             balance: BigInt(accountResp.balance ?? 0),
             staking: BigInt(accountResp.staking ?? 0),
             relay_balance: BigInt(accountResp.relay_balance ?? 0),
+            locked_emission: BigInt(accountResp.locked_emission ?? 0),
             delegator_staking: BigInt(accountResp.delegator_staking ?? 0),
             delegator_share: parseInt(accountResp.delegator_share ?? 0),
             delegator_num: parseInt(accountResp.delegator_num ?? 0),
@@ -1161,9 +1175,11 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
         >
             <a-card title="Node Scores" :bordered="false" style="height: 100%; opacity: 0.9">
                 <template #extra>
-                    <a href="https://docs.crynux.io/system-design/task-dispatching#node-selection-probability" target="_blank">
-                        <a-button type="text" :icon="h(QuestionCircleOutlined)" />
-                    </a>
+                    <a-button
+                        type="text"
+                        :icon="h(QuestionCircleOutlined)"
+                        @click="showQosDiagnosticsModal = true"
+                    />
                 </template>
                 <a-row>
                     <a-col :span="8">
@@ -1272,14 +1288,26 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
         >
             <a-card title="Relay Account" :bordered="false" style="height: 100%; opacity: 0.9">
                 <a-row>
-                    <a-col :span="12">
+                    <a-col :span="8">
                         <a-statistic title="CNX Balance" class="wallet-value">
                             <template #formatter>
                                 <a-typography-text>{{ relayBalance }}</a-typography-text>
                             </template>
                         </a-statistic>
                     </a-col>
-                    <a-col :span="12">
+                    <a-col :span="8">
+                        <a-statistic title="Locked" class="wallet-value">
+                            <template #formatter>
+                                <a-typography-text
+                                    :class="{ 'locked-amount': accountStatus.address !== '' }"
+                                    @click="accountStatus.address !== '' && (showEmissionsModal = true)"
+                                >
+                                    {{ lockedEmission }}
+                                </a-typography-text>
+                            </template>
+                        </a-statistic>
+                    </a-col>
+                    <a-col :span="8">
                         <a-statistic title="Action" class="wallet-value">
                             <template #formatter>
                                 <a-button
@@ -1733,6 +1761,12 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
         </a-button>
     </a-modal>
 
+    <qos-diagnostics-modal v-model:visible="showQosDiagnosticsModal" />
+    <emissions-modal
+        v-model:visible="showEmissionsModal"
+        :locked-emission="accountStatus.locked_emission"
+    />
+
     <a-modal
         v-model:visible="showWithdrawModal"
         title="Withdraw"
@@ -1893,6 +1927,13 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
 
 .wallet-value a:hover
     color #1677ff
+
+.wallet-value .locked-amount
+    cursor pointer
+
+.wallet-value .locked-amount:hover
+    color #1677ff
+
 
 .top-alert
     margin-bottom 16px

@@ -13,6 +13,15 @@ class AccountAPI extends BaseAPI {
         return this.getHttpClient().get('/account')
     }
 
+    getVestings(page = 1, pageSize = 20) {
+        return this.getHttpClient().get('/account/vesting/list', {
+            params: {
+                page,
+                page_size: pageSize
+            }
+        })
+    }
+
     updatePrivateKey(privateKey) {
         return this.getHttpClient().put('/account', {
             type: 'private_key',

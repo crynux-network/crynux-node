@@ -458,6 +458,55 @@ class WebRelay(Relay):
         return Web3.to_wei(balance, "wei")
 
     @_web_relay_restart_pool_error
+    async def get_locked_vesting(self, address: Optional[str] = None) -> int:
+        if address is None:
+            address = self.node_address
+        input = {"address": address}
+        timestamp, signature = self.signer.sign(input)
+        resp = await self.client.get(
+            f"/v2/relay_account/{address}/vesting/locked",
+            params={"timestamp": timestamp, "signature": signature},
+        )
+        resp = _process_resp(resp, "getLockedVesting")
+        content = resp.json()
+        locked = content["data"]
+        return Web3.to_wei(locked, "wei")
+
+    @_web_relay_restart_pool_error
+    async def get_vesting_records(
+        self, page: int = 1, page_size: int = 20, address: Optional[str] = None
+    ) -> Dict[str, Any]:
+        if address is None:
+            address = self.node_address
+        input = {"address": address}
+        timestamp, signature = self.signer.sign(input)
+        resp = await self.client.get(
+            f"/v2/relay_account/{address}/vesting/list",
+            params={
+                "timestamp": timestamp,
+                "signature": signature,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+        resp = _process_resp(resp, "getVestingRecords")
+        content = resp.json()
+        return content["data"]
+
+    @_web_relay_restart_pool_error
+    async def get_qos_tracing(self) -> Dict[str, Any]:
+        address = self.node_address
+        input = {"address": address}
+        timestamp, signature = self.signer.sign(input)
+        resp = await self.client.get(
+            f"/v2/node/{address}/qos/tracing",
+            params={"timestamp": timestamp, "signature": signature},
+        )
+        resp = _process_resp(resp, "getQosTracing")
+        content = resp.json()
+        return content["data"]
+
+    @_web_relay_restart_pool_error
     async def get_staking_amount(self) -> int:
         resp = await self.client.get(
             f"/v1/staking/{self.node_address}",

@@ -1,15 +1,17 @@
 import math
-from typing import Literal
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
 from pydantic import BaseModel
 from typing_extensions import Annotated
 
 from crynux_server import models, utils
+from crynux_server.relay import get_relay
+from crynux_server.relay.exceptions import RelayError
 
 from ..depends import (ManagerStateCacheDep, NodeStateManagerDep,
                        WorkerManagerDep)
-from .utils import CommonResponse
+from .utils import CommonResponse, http_exception_from_relay_error
 
 router = APIRouter(prefix="/node")
 
@@ -104,3 +106,36 @@ async def get_node_scores(*, state_cache: ManagerStateCacheDep) -> NodeScoresRes
         qos=node_score_state.qos_score,
         prob_weight=node_score_state.prob_weight,
     )
+
+
+class QosTraceEvent(BaseModel):
+    timestamp: int = 0
+    node_address: str = ""
+    task_id_commitment: str = ""
+    event_type: str = ""
+    task_qos_score: Optional[int] = None
+    validation_rank: Optional[int] = None
+    qos_long_before: float = 0
+    qos_long_after: float = 0
+    qos_short_before: float = 0
+    qos_short_after: float = 0
+    qos_before: float = 0
+    qos_after: float = 0
+
+
+class NodeQosTracingResponse(BaseModel):
+    node_address: str
+    max_task_events: int
+    events: List[QosTraceEvent]
+
+
+@router.get("/qos/tracing", response_model=NodeQosTracingResponse)
+async def get_qos_tracing() -> NodeQosTracingResponse:
+    try:
+        relay = get_relay()
+        data = await relay.get_qos_tracing()
+        return NodeQosTracingResponse.model_validate(data)
+    except AssertionError:
+        raise HTTPException(400, detail="Private key has not been set.")
+    except RelayError as e:
+        raise http_exception_from_relay_error(e)

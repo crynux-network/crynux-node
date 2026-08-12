@@ -1,15 +1,16 @@
-import logging
-from typing import Dict, Literal
+from typing import Dict, List, Literal
 
 from anyio import get_cancelled_exc_class, to_thread
 from eth_account import Account
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field, Json, SecretStr
 from typing_extensions import Annotated
 
 from crynux_server.config import set_privkey
+from crynux_server.relay import get_relay
+from crynux_server.relay.exceptions import RelayError
 
-from .utils import CommonResponse
+from .utils import CommonResponse, http_exception_from_relay_error
 from ..depends import AccountInfoDep
 from ..account import AccountInfo
 
@@ -20,6 +21,41 @@ router = APIRouter(prefix="/account")
 @router.get("", response_model=AccountInfo)
 async def get_account_info(*, account_info: AccountInfoDep):
     return account_info
+
+
+class VestingRecord(BaseModel):
+    id: int
+    created_at: int
+    address: str
+    total_amount: str
+    start_time: int
+    duration_days: int
+    type: str
+    released_amount: str
+    remaining_amount: str
+    locked_amount: str
+    status: int
+    slashed: bool
+
+
+class VestingListResponse(BaseModel):
+    total: int
+    vesting_records: List[VestingRecord]
+
+
+@router.get("/vesting/list", response_model=VestingListResponse)
+async def get_vesting_list(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> VestingListResponse:
+    try:
+        relay = get_relay()
+        data = await relay.get_vesting_records(page=page, page_size=page_size)
+        return VestingListResponse.model_validate(data)
+    except AssertionError:
+        raise HTTPException(400, detail="Private key has not been set.")
+    except RelayError as e:
+        raise http_exception_from_relay_error(e)
 
 
 PrivkeyType = Literal["private_key", "keystore"]

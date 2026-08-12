@@ -36,6 +36,10 @@ class NodeAPI extends BaseAPI {
     return this.getHttpClient().get('/node/scores')
   }
 
+  getQosTracing() {
+    return this.getHttpClient().get('/node/qos/tracing')
+  }
+
   sendNodeAction(action) {
     return this.getHttpClient().post('/node', {
       action: action

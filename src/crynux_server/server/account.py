@@ -15,6 +15,7 @@ class AccountInfo(BaseModel):
     address: str = ""
     balance: str = "0"
     relay_balance: str = "0"
+    locked_emission: str = "0"
     staking: str = "0"
     delegator_staking: str = "0"
     delegator_share: int = 0
@@ -40,6 +41,11 @@ async def update_account_info(interval: int):
                 relay_balance = await relay.get_balance()
                 _account_info.relay_balance = str(relay_balance)
                 _logger.debug(f"relay_balance: {_account_info.relay_balance}")
+
+            async def _update_locked_emission():
+                locked_emission = await relay.get_locked_vesting()
+                _account_info.locked_emission = str(locked_emission)
+                _logger.debug(f"locked_emission: {_account_info.locked_emission}")
 
             async def _update_balance():
                 balance = await contracts.get_balance(contracts.account)
@@ -76,6 +82,7 @@ async def update_account_info(interval: int):
 
             async with create_task_group() as tg:
                 tg.start_soon(_update_relay_balance)
+                tg.start_soon(_update_locked_emission)
                 tg.start_soon(_update_balance)
                 tg.start_soon(_update_staking)
                 tg.start_soon(_update_node_info)

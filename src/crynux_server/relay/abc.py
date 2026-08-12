@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import TYPE_CHECKING, BinaryIO, List, Optional
+from typing import TYPE_CHECKING, Any, BinaryIO, Dict, List, Optional
 
 from eth_typing import ChecksumAddress
 
@@ -125,6 +125,17 @@ class Relay(ABC):
 
     @abstractmethod
     async def get_balance(self, address: Optional[str] = None) -> int: ...
+
+    @abstractmethod
+    async def get_locked_vesting(self, address: Optional[str] = None) -> int: ...
+
+    @abstractmethod
+    async def get_vesting_records(
+        self, page: int = 1, page_size: int = 20, address: Optional[str] = None
+    ) -> Dict[str, Any]: ...
+
+    @abstractmethod
+    async def get_qos_tracing(self) -> Dict[str, Any]: ...
 
     @abstractmethod
     async def get_staking_amount(self) -> int: ...
