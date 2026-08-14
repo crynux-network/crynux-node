@@ -21,10 +21,9 @@ ethereum:
 
   # The deployed addresses of the smart contracts
   contract:
-    benefit_address: "0x7c8861a639B712D486eFB2C944419F7531700db0"
-    credits: "0xE474ecE312b79fDF833C76C0d8255fA688068e4a"
-    node_staking: "0x31609b6531399561c2B65b8673a17FE2575c1654"
-    delegated_staking: "0xAbCa3C0a800569c05e87E500306dFf9b8Ba21821"
+    benefit_address: "0x6FeB51C9602AA0a2Db3eC0cCEb950dF481b82CCA"
+    node_staking: "0xAc4d943B41e117E9EB116AA8E13F614cd4Afc13c"
+    delegated_staking: "0x702C10BEbA6Aa2D888636a42C16B35b0dad97FA2"
 
 # The database used to store the local state data
 # The data will not be large. A sqlite file is more than enough
