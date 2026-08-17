@@ -462,7 +462,7 @@ class WorkerManager(object):
                 _logger.info(f"Task {task_id_commitment} has been done before")
             else:
                 if result.result.status == "success":
-                    fut.set_result(None)
+                    fut.set_result(result.result)
                 elif result.result.status == "error":
                     err_msg = result.result.traceback
                     gpu_count = result.result.gpu_count

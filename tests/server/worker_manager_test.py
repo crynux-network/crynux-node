@@ -39,9 +39,13 @@ def make_task_input(task_id: str = TASK_ID) -> TaskInput:
     )
 
 
-def make_task_result(status: str, traceback: str = "") -> TaskResult:
+def make_task_result(
+    status: str, traceback: str = "", execution_dtype: str | None = None
+) -> TaskResult:
     if status == "success":
-        result = SuccessResult(status="success")
+        result = SuccessResult(
+            status="success", execution_dtype=execution_dtype
+        )
     else:
         result = ErrorResult(status="error", traceback=traceback)
     return TaskResult(task_name="inference", task_id_commitment=TASK_ID, result=result)
@@ -118,10 +122,35 @@ async def test_success_result_does_not_restart_worker(worker_manager):
     worker_id, fut = await dispatch_task(worker_manager)
 
     await worker_manager.report_task_result(worker_id, make_task_result("success"))
-    await fut.get()
+    result = await fut.get()
 
     await sleep(0.1)
     assert worker_manager.restart_calls == 0
+    assert result.execution_dtype is None
+
+
+async def test_success_result_propagates_execution_dtype(worker_manager):
+    worker_id, fut = await dispatch_task(worker_manager)
+
+    await worker_manager.report_task_result(
+        worker_id, make_task_result("success", execution_dtype="float16")
+    )
+    result = await fut.get()
+
+    assert result.execution_dtype == "float16"
+
+
+def test_success_result_accepts_legacy_worker_payload():
+    result = TaskResult.model_validate(
+        {
+            "task_name": "inference",
+            "task_id_commitment": TASK_ID,
+            "result": {"status": "success"},
+        }
+    )
+
+    assert result.result.status == "success"
+    assert result.result.execution_dtype is None
 
 
 async def test_watchdog_restarts_worker_on_missed_deadline(worker_manager):

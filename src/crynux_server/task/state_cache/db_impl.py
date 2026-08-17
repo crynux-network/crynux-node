@@ -32,6 +32,7 @@ class DbInferenceTaskStateCache(InferenceTaskStateCache):
                     waiting_tx_method=state.waiting_tx_method,
                     checkpoint=state.checkpoint,
                     result_uploaded=state.result_uploaded,
+                    execution_dtype=state.execution_dtype,
                 )
             else:
                 raise KeyError(
@@ -59,6 +60,7 @@ class DbInferenceTaskStateCache(InferenceTaskStateCache):
                     waiting_tx_method=task_state.waiting_tx_method,
                     checkpoint=task_state.checkpoint,
                     result_uploaded=task_state.result_uploaded,
+                    execution_dtype=task_state.execution_dtype,
                 )
                 sess.add(state)
             else:
@@ -71,6 +73,7 @@ class DbInferenceTaskStateCache(InferenceTaskStateCache):
                 state.waiting_tx_method = task_state.waiting_tx_method
                 state.checkpoint = task_state.checkpoint
                 state.result_uploaded = task_state.result_uploaded
+                state.execution_dtype = task_state.execution_dtype
             await sess.commit()
 
     async def has(self, task_id_commitment: bytes) -> bool:
@@ -110,6 +113,7 @@ class DbInferenceTaskStateCache(InferenceTaskStateCache):
                     waiting_tx_method=state.waiting_tx_method,
                     checkpoint=state.checkpoint,
                     result_uploaded=state.result_uploaded,
+                    execution_dtype=state.execution_dtype,
                 )
                 for state in states
             ]

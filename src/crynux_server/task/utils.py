@@ -45,7 +45,7 @@ async def run_inference_task(
     )
     task_result = await worker_manager.send_task(task_input, deadline=deadline)
     try:
-        await task_result.get()
+        success_result = await task_result.get()
     except get_cancelled_exc_class():
         # Drop the queued task so it is never sent to the worker
         # after the awaiting runner has been cancelled
@@ -78,7 +78,7 @@ async def run_inference_task(
         hashes = [get_image_hash(filename) for filename in files]
         checkpoint = os.path.join(task_dir, "checkpoint")
 
-    return files, hashes, checkpoint
+    return files, hashes, checkpoint, success_result.execution_dtype
 
 
 async def run_download_task(

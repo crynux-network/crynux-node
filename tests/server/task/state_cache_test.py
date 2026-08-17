@@ -1,4 +1,5 @@
 import os
+import sqlite3
 
 import pytest
 
@@ -21,6 +22,7 @@ def make_state() -> InferenceTaskState:
         files=["test.png"],
         score=bytes([1] * 8),
         checkpoint="",
+        execution_dtype="bfloat16",
     )
 
 
@@ -41,6 +43,7 @@ async def run_cache_roundtrip(cache):
     assert await cache.has(TASK_ID)
     loaded = await cache.load(TASK_ID)
     assert loaded == state
+    assert loaded.execution_dtype == "bfloat16"
     assert not loaded.result_uploaded
 
     state.status = InferenceTaskStatus.Validated
@@ -63,3 +66,40 @@ async def test_memory_state_cache():
 
 async def test_db_state_cache(init_db):
     await run_cache_roundtrip(DbInferenceTaskStateCache())
+
+
+async def test_db_init_adds_execution_dtype_to_existing_state_table(tmp_path):
+    filename = str(tmp_path / "legacy.db")
+    with sqlite3.connect(filename) as conn:
+        conn.execute(
+            """
+            CREATE TABLE inference_task_states (
+                id INTEGER PRIMARY KEY,
+                task_id_commitment VARCHAR(64) NOT NULL,
+                timeout INTEGER NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                task_type VARCHAR(32) NOT NULL,
+                files TEXT NOT NULL,
+                score BLOB NOT NULL,
+                waiting_tx_hash BLOB NOT NULL,
+                waiting_tx_method VARCHAR NOT NULL,
+                checkpoint VARCHAR,
+                result_uploaded BOOLEAN NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+
+    await db.init(DBConfig.model_validate({"driver": "sqlite", "filename": filename}))
+    try:
+        with sqlite3.connect(filename) as conn:
+            columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(inference_task_states)"
+                ).fetchall()
+            }
+        assert "execution_dtype" in columns
+    finally:
+        await db.close()

@@ -250,15 +250,16 @@ class TaskReconciler(object):
 
         _logger.info(f"Start executing task {task_id_hex}")
         try:
-            files, score, checkpoint = await self._run_task_on_worker(
+            files, score, checkpoint, execution_dtype = await self._run_task_on_worker(
                 state, task, deadline
             )
             if not validate_score(score):
                 raise ValueError(f"Task {task_id_hex} score {score.hex()} is invalid")
-            # Persist the result files and score before any submission attempt
+            # Persist successful execution artifacts before score submission
             state.files = files
             state.score = score
             state.checkpoint = checkpoint
+            state.execution_dtype = execution_dtype
             await self.cache.dump(state)
             self._execution_outcomes[task_id] = "success"
             _logger.info(f"Task {task_id_hex} execution success")
@@ -414,7 +415,7 @@ class TaskReconciler(object):
         )
 
     # Run the task on the worker through the worker manager and return
-    # (files, score, checkpoint)
+    # (files, score, checkpoint, execution_dtype)
     async def _run_task_on_worker(
         self,
         state: models.InferenceTaskState,
@@ -449,7 +450,7 @@ class TaskReconciler(object):
         task_models = [
             models.ModelConfig.from_model_id(model_id) for model_id in task.model_ids
         ]
-        files, hashes, checkpoint = await run_inference_task(
+        files, hashes, checkpoint, execution_dtype = await run_inference_task(
             task_id_commitment=task_id,
             task_type=state.task_type,
             models=task_models,
@@ -457,7 +458,7 @@ class TaskReconciler(object):
             task_dir=task_dir,
             deadline=deadline,
         )
-        return files, b"".join(hashes), checkpoint
+        return files, b"".join(hashes), checkpoint, execution_dtype
 
     async def _download_auxiliary_models(
         self, task_id_hex: str, task: models.RelayTask, deadline: float
@@ -505,7 +506,9 @@ class TaskReconciler(object):
     async def _submit_score(self, state: models.InferenceTaskState):
         task_id = bytes(state.task_id_commitment)
         await self.relay.submit_task_score(
-            task_id_commitment=task_id, score=state.score
+            task_id_commitment=task_id,
+            score=state.score,
+            execution_dtype=state.execution_dtype,
         )
         _logger.info(f"Submitted the score of task {HexBytes(task_id).hex()}")
 

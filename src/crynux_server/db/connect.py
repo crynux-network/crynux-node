@@ -70,6 +70,13 @@ async def init(db: DBConfig | None = None):
                     "ADD COLUMN result_uploaded BOOLEAN NOT NULL DEFAULT 0"
                 )
             )
+        if "execution_dtype" not in columns:
+            await conn.execute(
+                sa.text(
+                    "ALTER TABLE inference_task_states "
+                    "ADD COLUMN execution_dtype TEXT"
+                )
+            )
 
     _local.engine = engine
     _local.session = session

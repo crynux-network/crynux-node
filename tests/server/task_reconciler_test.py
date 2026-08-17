@@ -66,6 +66,7 @@ class FakeRelay:
         self.pointer: Optional[bytes] = None
         self.statuses: Dict[bytes, models.InferenceTaskStatus] = {}
         self.calls = Counter()
+        self.submitted_execution_dtypes = []
         self._next_errors: Dict[str, Exception] = {}
         # When True, a state-changing request applies its effect before
         # raising the injected error (response lost after a successful write)
@@ -102,8 +103,11 @@ class FakeRelay:
         self._enter("report_task_error", apply)
         apply()
 
-    async def submit_task_score(self, task_id_commitment: bytes, score: bytes):
+    async def submit_task_score(
+        self, task_id_commitment: bytes, score: bytes, execution_dtype=None
+    ):
         task_id = bytes(task_id_commitment)
+        self.submitted_execution_dtypes.append(execution_dtype)
 
         def apply():
             self.statuses[task_id] = models.InferenceTaskStatus.ScoreReady
@@ -128,12 +132,12 @@ class FakeRelay:
 
 
 # Reconciler whose worker execution follows a scripted result: a
-# (files, score, checkpoint) tuple or an exception to raise
+# (files, score, checkpoint, execution_dtype) tuple or an exception to raise
 class ScriptedReconciler(TaskReconciler):
     def __init__(self, relay, state_cache, worker_result=None):
         super().__init__(relay=relay, state_cache=state_cache, config=object())
         self.execute_calls = 0
-        self.worker_result = worker_result or (RESULT_FILES, VALID_SCORE, None)
+        self.worker_result = worker_result or (RESULT_FILES, VALID_SCORE, None, None)
 
     async def _run_task_on_worker(self, state, task, deadline):
         self.execute_calls += 1
@@ -212,10 +216,12 @@ async def test_happy_path():
     state = await reconciler.cache.load(TASK_ID_1)
     assert state.score == VALID_SCORE
     assert state.files == RESULT_FILES
+    assert state.execution_dtype is None
 
     # Started + valid score -> submit
     await cycle(reconciler)
     assert relay.calls["submit_task_score"] == 1
+    assert relay.submitted_execution_dtypes == [None]
     assert relay.statuses[TASK_ID_1] == models.InferenceTaskStatus.ScoreReady
 
     # ScoreReady -> no action
@@ -241,6 +247,22 @@ async def test_happy_path():
     assert relay.calls["get_task"] == get_task_calls
     assert reconciler.execute_calls == 1
     assert relay.calls["report_task_error"] == 0
+
+
+async def test_execution_dtype_is_persisted_and_submitted():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    reconciler = make_reconciler(
+        relay, worker_result=(RESULT_FILES, VALID_SCORE, None, "bfloat16")
+    )
+
+    await cycle(reconciler)
+    state = await reconciler.cache.load(TASK_ID_1)
+    assert state.execution_dtype == "bfloat16"
+
+    await cycle(reconciler)
+    assert relay.submitted_execution_dtypes == ["bfloat16"]
 
 
 async def test_execution_error_closes_task_silently():

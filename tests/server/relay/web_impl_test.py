@@ -56,6 +56,62 @@ async def test_transport_error_propagates_without_retry():
         await relay.client.aclose()
 
 
+@pytest.mark.parametrize(
+    ("execution_dtype", "expected_signed_input", "expected_body_dtype"),
+    [
+        (
+            None,
+            {
+                "task_id_commitment": "0x" + TASK_ID.hex(),
+                "score": "0x" + "01" * 8,
+            },
+            False,
+        ),
+        (
+            "bfloat16",
+            {
+                "task_id_commitment": "0x" + TASK_ID.hex(),
+                "score": "0x" + "01" * 8,
+                "execution_dtype": "bfloat16",
+            },
+            True,
+        ),
+    ],
+)
+async def test_submit_score_signs_optional_execution_dtype(
+    execution_dtype, expected_signed_input, expected_body_dtype
+):
+    captured = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured
+        captured = request
+        return httpx.Response(200, json={"message": "success"})
+
+    relay = make_relay(handler)
+    signed_input = None
+
+    def sign(input, timestamp=None):
+        nonlocal signed_input
+        signed_input = input
+        return 1784851234, "0x" + "01" * 65
+
+    relay.signer.sign = sign
+    try:
+        await relay.submit_task_score(
+            TASK_ID, bytes([1] * 8), execution_dtype=execution_dtype
+        )
+    finally:
+        await relay.client.aclose()
+
+    assert signed_input == expected_signed_input
+    assert captured is not None
+    body = json.loads(captured.content)
+    assert ("execution_dtype" in body) is expected_body_dtype
+    if expected_body_dtype:
+        assert body["execution_dtype"] == execution_dtype
+
+
 async def test_task_diagnostic_request_contains_signed_fields():
     captured = None
 

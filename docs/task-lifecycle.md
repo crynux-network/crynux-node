@@ -25,7 +25,7 @@ Therefore:
 
 ## 2) Reconcile Conditions and Actions
 
-Each reconcile cycle derives at most one action from the fresh relay task status and the local task record. The local task record consists of the persisted artifacts (result files, score, checkpoint, result-uploaded marker) and the process-local execution outcome of the current worker lifetime.
+Each reconcile cycle derives at most one action from the fresh relay task status and the local task record. The local task record consists of the persisted artifacts (result files, score, checkpoint, optional execution dtype, result-uploaded marker) and the process-local execution outcome of the current worker lifetime.
 
 | Relay status | Local condition | Action |
 |--------------|-----------------|--------|
@@ -45,7 +45,7 @@ The relay sets the node's current-task pointer in the same transaction that sets
 
 ### Execution outcomes
 
-- **Success**: all required foreground downloads and inference completed. The result files and score MUST be persisted in the local task record before score submission is attempted. No code path is allowed to re-invoke the worker for a task whose local record already contains a valid score.
+- **Success**: all required foreground downloads and inference completed. The result files, score, and optional Worker-reported execution dtype MUST be persisted in the local task record before score submission is attempted. Score submission MUST include the execution dtype in both the signed input and request body when the Worker reported it. When an older Worker omits the field, the Node MUST omit it from both the signature and request body so the legacy score request remains unchanged. No code path is allowed to re-invoke the worker for a task whose local record already contains a valid score.
 - **`TaskInvalid`**: the loop reports the task error to the relay. Score submission MUST NOT be attempted afterwards. The task converges when a later cycle observes `ErrorReported` and closes it.
 - **`TaskExecutionError`**: the loop logs the failure and closes the task locally. This includes foreground download failure, cancellation, and deadline expiry. Inference MUST NOT start after a foreground download failure. The loop MUST NOT report a task error and MUST NOT re-execute. The task remains `Started` on the relay and is aborted by the relay's timeout processor; worker recovery is the worker manager's responsibility and happens independently.
 - **`TaskCancelled`** (the execution future was cancelled by a worker restart): handled exactly like `TaskExecutionError`: log and close locally, without reporting a task error. A cancelled execution MUST NOT trigger another worker restart.

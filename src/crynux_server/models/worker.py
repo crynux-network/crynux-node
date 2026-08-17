@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,7 @@ class TaskInput(BaseModel):
 
 class SuccessResult(BaseModel):
     status: Literal["success"]
+    execution_dtype: Optional[str] = None
 
 
 class ErrorResult(BaseModel):

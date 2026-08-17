@@ -196,15 +196,32 @@ class WebRelay(Relay):
         _process_resp(resp, "reportTaskDiagnostic")
 
     @_web_relay_restart_pool_error
-    async def submit_task_score(self, task_id_commitment: bytes, score: bytes):
+    async def submit_task_score(
+        self,
+        task_id_commitment: bytes,
+        score: bytes,
+        execution_dtype: Optional[str] = None,
+    ):
         task_id_commitment_hex = HexBytes(task_id_commitment).hex()
         score_hex = HexBytes(score).hex()
-        input = {"task_id_commitment": task_id_commitment_hex, "score": score_hex}
+        input: Dict[str, Any] = {
+            "task_id_commitment": task_id_commitment_hex,
+            "score": score_hex,
+        }
+        if execution_dtype is not None:
+            input["execution_dtype"] = execution_dtype
         timestamp, signature = self.signer.sign(input)
 
+        body: Dict[str, Any] = {
+            "score": score_hex,
+            "timestamp": timestamp,
+            "signature": signature,
+        }
+        if execution_dtype is not None:
+            body["execution_dtype"] = execution_dtype
         resp = await self.client.post(
             f"/v1/inference_tasks/{task_id_commitment_hex}/score",
-            json={"score": score_hex, "timestamp": timestamp, "signature": signature},
+            json=body,
         )
         resp = _process_resp(resp, "submitTaskScore")
 

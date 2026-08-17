@@ -49,7 +49,12 @@ class Relay(ABC):
     async def report_task_diagnostic(self, report: "TaskErrorReport"): ...
 
     @abstractmethod
-    async def submit_task_score(self, task_id_commitment: bytes, score: bytes): ...
+    async def submit_task_score(
+        self,
+        task_id_commitment: bytes,
+        score: bytes,
+        execution_dtype: Optional[str] = None,
+    ): ...
 
     @abstractmethod
     async def upload_task_result(
