@@ -12,7 +12,7 @@
 
 ## Model Compatibility Authority
 
-The longitudinal OpenAI-compatible flow, canonical task ownership boundaries, public response normalization, and OpenAI-to-task tool-history adaptation, including `function.arguments` representation conversion, MUST use `crynux-bridge/docs/model-compatibility/` in the standalone Bridge repository as their authority.
+The Crynux AS OpenAI-compatible flow, canonical task ownership boundaries, public response normalization, and OpenAI-to-task tool-history adaptation, including `function.arguments` representation conversion, MUST use `crynux-as/docs/model-compatibility/` in the standalone AS repository as their authority. Bridge legacy endpoint behavior and raw-task transport boundaries MUST use `crynux-bridge/docs/model-compatibility/`.
 
 Prompt rendering, chat templates, processor behavior, the model-input requirements for tools and tool history after task delivery, thinking template controls, AutoClass, remote `auto_map`, execution backends, tensor-parallel fallback, generation, and raw decoding MUST use `gpt-task/docs/model-compatibility/` in the standalone gpt-task repository as their authority.
 
