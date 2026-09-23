@@ -4,7 +4,7 @@
     "log": {
         "level": "info"
     },
-    "block_explorer": "",
+    "block_explorer": "https://cnxscan.base.crynux.io",
     "network": "crynux-on-base",
     "network_logo": "base",
     "gas_fee_min_wei": "10000000000000000"

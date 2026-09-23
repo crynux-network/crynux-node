@@ -1990,6 +1990,11 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
     .base-logo
         margin-top -4px
 
+    .rh-logo
+        width 170px
+        height auto
+        margin-top -2px
+
 .xs .top-row
     height 64px
 .sm .top-row

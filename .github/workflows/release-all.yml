@@ -33,26 +33,12 @@ jobs:
         blockchain:
           - base
           - near
+          - rh
     name: Build the Docker image for ${{ matrix.blockchain }}
     uses: ./.github/workflows/release-all-docker.yml
     secrets: inherit
     with:
       blockchain: ${{ matrix.blockchain }}
-
-  build-the-lxc-images:
-    needs: [prepare-version]
-    strategy:
-      max-parallel: 1
-      matrix:
-        blockchain:
-          - base
-          - near
-    name: Build the LXC image for ${{ matrix.blockchain }}
-    uses: ./.github/workflows/release-all-lxc.yml
-    secrets: inherit
-    with:
-      blockchain: ${{ matrix.blockchain }}
-      release_version: ${{ needs.prepare-version.outputs.version }}
 
   build-the-mac-dmgs:
     needs: [prepare-version]
@@ -61,6 +47,7 @@ jobs:
         blockchain:
           - base
           - near
+          - rh
     name: Build the Mac DMG for ${{ matrix.blockchain }}
     uses: ./.github/workflows/release-all-mac.yml
     secrets: inherit
@@ -75,6 +62,7 @@ jobs:
         blockchain:
           - base
           - near
+          - rh
     name: Build the Windows binary for ${{ matrix.blockchain }}
     uses: ./.github/workflows/release-all-windows.yml
     secrets: inherit
@@ -109,16 +97,24 @@ jobs:
           WINDOWS_DOWNLOAD_LINK_NEAR=$(tr -d '\r\n' < gdrive-links-near/download_link.txt | sed 's/[\x00-\x1F]//g')
           WINDOWS_PREVIEW_LINK_NEAR=$(tr -d '\r\n' < gdrive-links-near/view_link.txt | sed 's/[\x00-\x1F]//g')
 
+          # Read Rh links
+          WINDOWS_DOWNLOAD_LINK_RH=$(tr -d '\r\n' < gdrive-links-rh/download_link.txt | sed 's/[\x00-\x1F]//g')
+          WINDOWS_PREVIEW_LINK_RH=$(tr -d '\r\n' < gdrive-links-rh/view_link.txt | sed 's/[\x00-\x1F]//g')
+
           echo "Windows download link (Base): ${WINDOWS_DOWNLOAD_LINK_BASE}, length: ${#WINDOWS_DOWNLOAD_LINK_BASE}"
           echo "Windows preview link (Base): ${WINDOWS_PREVIEW_LINK_BASE}, length: ${#WINDOWS_PREVIEW_LINK_BASE}"
           echo "Windows download link (Near): ${WINDOWS_DOWNLOAD_LINK_NEAR}, length: ${#WINDOWS_DOWNLOAD_LINK_NEAR}"
           echo "Windows preview link (Near): ${WINDOWS_PREVIEW_LINK_NEAR}, length: ${#WINDOWS_PREVIEW_LINK_NEAR}"
+          echo "Windows download link (Rh): ${WINDOWS_DOWNLOAD_LINK_RH}, length: ${#WINDOWS_DOWNLOAD_LINK_RH}"
+          echo "Windows preview link (Rh): ${WINDOWS_PREVIEW_LINK_RH}, length: ${#WINDOWS_PREVIEW_LINK_RH}"
 
           # Set outputs
           echo "WINDOWS_DOWNLOAD_LINK_BASE=${WINDOWS_DOWNLOAD_LINK_BASE}" >> $GITHUB_ENV
           echo "WINDOWS_PREVIEW_LINK_BASE=${WINDOWS_PREVIEW_LINK_BASE}" >> $GITHUB_ENV
           echo "WINDOWS_DOWNLOAD_LINK_NEAR=${WINDOWS_DOWNLOAD_LINK_NEAR}" >> $GITHUB_ENV
           echo "WINDOWS_PREVIEW_LINK_NEAR=${WINDOWS_PREVIEW_LINK_NEAR}" >> $GITHUB_ENV
+          echo "WINDOWS_DOWNLOAD_LINK_RH=${WINDOWS_DOWNLOAD_LINK_RH}" >> $GITHUB_ENV
+          echo "WINDOWS_PREVIEW_LINK_RH=${WINDOWS_PREVIEW_LINK_RH}" >> $GITHUB_ENV
 
       - name: Print the Google Drive links
         run: |
@@ -126,6 +122,8 @@ jobs:
           echo "Windows preview link (Base): ${{ env.WINDOWS_PREVIEW_LINK_BASE }}"
           echo "Windows download link (Near): ${{ env.WINDOWS_DOWNLOAD_LINK_NEAR }}"
           echo "Windows preview link (Near): ${{ env.WINDOWS_PREVIEW_LINK_NEAR }}"
+          echo "Windows download link (Rh): ${{ env.WINDOWS_DOWNLOAD_LINK_RH }}"
+          echo "Windows preview link (Rh): ${{ env.WINDOWS_PREVIEW_LINK_RH }}"
 
       - name: Download Mac DMGs
         uses: actions/download-artifact@v4
@@ -146,10 +144,12 @@ jobs:
           # Escape the links for sed
           windows_base_link_escaped=$(printf '%s\n' "${{ env.WINDOWS_DOWNLOAD_LINK_BASE }}" | sed -e 's/[\/&]/\\&/g')
           windows_near_link_escaped=$(printf '%s\n' "${{ env.WINDOWS_DOWNLOAD_LINK_NEAR }}" | sed -e 's/[\/&]/\\&/g')
+          windows_rh_link_escaped=$(printf '%s\n' "${{ env.WINDOWS_DOWNLOAD_LINK_RH }}" | sed -e 's/[\/&]/\\&/g')
           # Replace placeholders in the changelog template
           sed -i "s/RELEASE_VERSION/${{ env.RELEASE_VERSION }}/g" build/changelog-template.md
           sed -i "s/WINDOWS_LINK_BASE/$windows_base_link_escaped/g" build/changelog-template.md
           sed -i "s/WINDOWS_LINK_NEAR/$windows_near_link_escaped/g" build/changelog-template.md
+          sed -i "s/WINDOWS_LINK_RH/$windows_rh_link_escaped/g" build/changelog-template.md
 
       - id: release
         name: Release
@@ -160,13 +160,46 @@ jobs:
           files: |
             crynux-node-lithium-v${{ env.RELEASE_VERSION }}-base-mac-arm64-unsigned.dmg
             crynux-node-lithium-v${{ env.RELEASE_VERSION }}-near-mac-arm64-unsigned.dmg
+            crynux-node-lithium-v${{ env.RELEASE_VERSION }}-rh-mac-arm64-unsigned.dmg
+
+      - name: Resolve Mac download links by filename
+        id: mac_links
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_ASSETS: ${{ steps.release.outputs.assets }}
+          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+
+          assets = json.loads(os.environ["RELEASE_ASSETS"])
+          version = os.environ["RELEASE_VERSION"]
+          wanted = {
+              "base": f"crynux-node-lithium-v{version}-base-mac-arm64-unsigned.dmg",
+              "near": f"crynux-node-lithium-v{version}-near-mac-arm64-unsigned.dmg",
+              "rh": f"crynux-node-lithium-v{version}-rh-mac-arm64-unsigned.dmg",
+          }
+          by_name = {asset["name"]: asset["browser_download_url"] for asset in assets}
+          missing = [name for name in wanted.values() if name not in by_name]
+          if missing:
+              raise SystemExit(f"missing release assets: {missing}")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"MAC_LINK_BASE={by_name[wanted['base']]}\n")
+              env_file.write(f"MAC_LINK_NEAR={by_name[wanted['near']]}\n")
+              env_file.write(f"MAC_LINK_RH={by_name[wanted['rh']]}\n")
+          PY
     outputs:
       windows-download-link-base: ${{ env.WINDOWS_DOWNLOAD_LINK_BASE }}
       windows-preview-link-base: ${{ env.WINDOWS_PREVIEW_LINK_BASE }}
       windows-download-link-near: ${{ env.WINDOWS_DOWNLOAD_LINK_NEAR }}
       windows-preview-link-near: ${{ env.WINDOWS_PREVIEW_LINK_NEAR }}
-      mac-link-base: ${{ fromJSON(steps.release.outputs.assets)[0].browser_download_url }}
-      mac-link-near: ${{ fromJSON(steps.release.outputs.assets)[1].browser_download_url }}
+      windows-download-link-rh: ${{ env.WINDOWS_DOWNLOAD_LINK_RH }}
+      windows-preview-link-rh: ${{ env.WINDOWS_PREVIEW_LINK_RH }}
+      mac-link-base: ${{ env.MAC_LINK_BASE }}
+      mac-link-near: ${{ env.MAC_LINK_NEAR }}
+      mac-link-rh: ${{ env.MAC_LINK_RH }}
 
   update-documentation:
     runs-on: ubuntu-22.04
@@ -185,8 +218,11 @@ jobs:
               "windows-preview-link-base": "${{ needs.publish-release.outputs.windows-preview-link-base }}",
               "windows-download-link-near": "${{ needs.publish-release.outputs.windows-download-link-near }}",
               "windows-preview-link-near": "${{ needs.publish-release.outputs.windows-preview-link-near }}",
+              "windows-download-link-rh": "${{ needs.publish-release.outputs.windows-download-link-rh }}",
+              "windows-preview-link-rh": "${{ needs.publish-release.outputs.windows-preview-link-rh }}",
               "mac-link-base": "${{ needs.publish-release.outputs.mac-link-base }}",
               "mac-link-near": "${{ needs.publish-release.outputs.mac-link-near }}",
+              "mac-link-rh": "${{ needs.publish-release.outputs.mac-link-rh }}",
               "release-version": "${{ env.RELEASE_VERSION }}"
             }
   update-docker-compose-project:

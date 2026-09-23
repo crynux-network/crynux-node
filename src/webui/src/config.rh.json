@@ -4,8 +4,8 @@
     "log": {
         "level": "info"
     },
-    "block_explorer": "https://cnxscan.near.crynux.io",
-    "network": "crynux-on-near",
-    "network_logo": "near",
+    "block_explorer": "https://cnxscan.rh.crynux.io",
+    "network": "crynux-on-rh",
+    "network_logo": "rh",
     "gas_fee_min_wei": "10000000000000000"
 }

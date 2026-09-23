@@ -6,6 +6,9 @@
 #### Near
 [crynux-node-lithium-vRELEASE_VERSION-near-windows-x64.zip](WINDOWS_LINK_NEAR)
 
+#### Rh
+[crynux-node-lithium-vRELEASE_VERSION-rh-windows-x64.zip](WINDOWS_LINK_RH)
+
 
 ### Mac
 

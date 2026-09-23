@@ -1,0 +1,70 @@
+log:
+  # The directory to save the log files
+  dir: "logs"
+
+  # Log level could be "DEBUG", "INFO", "WARNING", "ERROR"
+  level: "INFO"
+
+task_error_report:
+  automatic: false
+
+ethereum:
+  # The JSON RPC endpoint of the Blockchain node
+  provider: "https://json-rpc.rh.crynux.io"
+  network: "crynux-on-rh"
+  chain_id: 18896215
+
+  # The Blockchain params
+  gas_price: 700000000
+  gas: 8000000
+
+  # The deployed addresses of the smart contracts
+  contract:
+    benefit_address: "0xd2EA1749399B1d9D12B03B5443F3B9Bd059DFfDE"
+    node_staking: "0xFc80e019d00f0d06CbebdE648990A89c5a25B425"
+    delegated_staking: "0x19d8A7584830fbbB163E25e5691dc84c58467C2f"
+
+# The database used to store the local state data
+# The data will not be large. A sqlite file is more than enough
+# There is no need to mount this file to the host machine to persist it
+db:
+  # The database dirver, can only be sqlite now
+  driver: sqlite
+  # The sqlite database file
+  filename: db/server.db
+
+# The URL of the Relay
+relay_url: "https://relay.crynux.io"
+
+# The directory that stores the distribution files of the WebUI
+web_dist: dist
+
+# The resource dir for icons etc.
+resource_dir: res
+
+task_config:
+  # Models that will be preloaded before any task execution
+  # Other models specified by the task
+  # will be downloaded during the task execution
+  preloaded_models:
+    sd_base:
+      - id: "crynux-network/sdxl-turbo"
+        variant: "fp16"
+      - id: "crynux-network/stable-diffusion-v1-5"
+        variant: "fp16"
+    gpt_base:
+      - id: "qwen/qwen3-8b"
+    controlnet: []
+    lora: []
+
+  # The proxy server used when downloading models.
+  proxy:
+    host: ""
+    port: 33210
+
+  # URL of repository stores patch files of crynux worker
+  worker_patch_url: https://raw.githubusercontent.com/crynux-network/crynux-worker/main
+
+  # Tensor parallel fallback when model dims are not divisible by GPU count
+  # device_map: classic layer sharding; reduce_gpus: use fewer GPUs that divide
+  tp_fallback: device_map

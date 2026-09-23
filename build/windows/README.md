@@ -1,6 +1,6 @@
 ## Build the Windows binary version of the Crynux node
 
-Choose the target blockchain before building. The supported values are `base` and `near`. The blockchain value must be passed to the build script so the generated artifact folder and zip file include the required `-base` or `-near` suffix.
+Choose the target blockchain before building. The supported values are `base`, `near`, and `rh`. The blockchain value must be passed to the build script so the generated artifact folder and zip file include the required `-base`, `-near`, or `-rh` suffix.
 
 ### All in one script
 
