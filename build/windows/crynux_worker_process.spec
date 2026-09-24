@@ -8,7 +8,8 @@ scipy_hiddenimports = collect_submodules('scipy')
 scipy_datas = collect_data_files('scipy')
 rfc3987_syntax_datas = collect_data_files('rfc3987_syntax')
 bitsandbytes_binaries = collect_dynamic_libs('bitsandbytes')
-binaries = bitsandbytes_binaries
+xgrammar_binaries = collect_dynamic_libs('xgrammar')
+binaries = bitsandbytes_binaries + xgrammar_binaries
 metadata_packages = [
     ('bitsandbytes', False),
     ('diffusers', True),
@@ -45,6 +46,7 @@ metadata_packages = [
     ('urllib3', False),
     ('websockets', False),
     ('whatthepatch', False),
+    ('xgrammar', False),
 ]
 metadata_datas = []
 for package_name, recursive in metadata_packages:

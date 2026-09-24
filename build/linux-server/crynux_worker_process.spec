@@ -1,12 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_dynamic_libs
 from PyInstaller.utils.hooks import copy_metadata
 
 scipy_hiddenimports = collect_submodules('scipy')
 scipy_datas = collect_data_files('scipy')
 rfc3987_syntax_datas = collect_data_files('rfc3987_syntax')
-binaries = []
+xgrammar_binaries = collect_dynamic_libs('xgrammar')
+binaries = xgrammar_binaries
 metadata_packages = [
     ('diffusers', True),
     ('transformers', True),
@@ -42,6 +44,7 @@ metadata_packages = [
     ('urllib3', False),
     ('websockets', False),
     ('whatthepatch', False),
+    ('xgrammar', False),
 ]
 metadata_datas = []
 for package_name, recursive in metadata_packages:
