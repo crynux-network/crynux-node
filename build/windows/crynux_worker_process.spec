@@ -2,6 +2,7 @@
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.utils.hooks import collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_all
 from PyInstaller.utils.hooks import copy_metadata
 
 scipy_hiddenimports = collect_submodules('scipy')
@@ -9,7 +10,8 @@ scipy_datas = collect_data_files('scipy')
 rfc3987_syntax_datas = collect_data_files('rfc3987_syntax')
 bitsandbytes_binaries = collect_dynamic_libs('bitsandbytes')
 xgrammar_binaries = collect_dynamic_libs('xgrammar')
-binaries = bitsandbytes_binaries + xgrammar_binaries
+triton_datas, triton_binaries, triton_hiddenimports = collect_all('triton')
+binaries = bitsandbytes_binaries + xgrammar_binaries + triton_binaries
 metadata_packages = [
     ('bitsandbytes', False),
     ('diffusers', True),
@@ -43,6 +45,7 @@ metadata_packages = [
     ('tiktoken', False),
     ('torch', False),
     ('torchvision', False),
+    ('triton-windows', False),
     ('urllib3', False),
     ('websockets', False),
     ('whatthepatch', False),
@@ -56,10 +59,10 @@ a = Analysis(
     ['worker/crynux_worker_process.py'],
     pathex=[],
     binaries=binaries,
-    datas=scipy_datas + rfc3987_syntax_datas + metadata_datas,
+    datas=scipy_datas + rfc3987_syntax_datas + triton_datas + metadata_datas,
     hiddenimports=[
         "diffusers.pipelines.stable_diffusion_xl.pipeline_output",
-    ] + scipy_hiddenimports,
+    ] + scipy_hiddenimports + triton_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -67,6 +70,8 @@ a = Analysis(
         'diffusers': 'py',
         'transformers': 'py',
         'torch': 'py',
+        'triton': 'py',
+        'xgrammar': 'py',
         'sd_task': 'py',
         'gpt_task': 'py',
         'crynux_worker': 'py',

@@ -111,14 +111,6 @@ Check-ExitCode
 pip install .
 Check-ExitCode
 
-# Uninstall triton if it is installed
-pip show triton > $null
-if ($?) {
-    Write-Output "Uninstalling triton..."
-    pip uninstall triton -y
-    Check-ExitCode
-}
-
 Set-Location $RELEASE_DIR
 New-Item -ItemType Directory -Path config
 Copy-Item -Recurse "$WORK_DIR/build/data" "data"

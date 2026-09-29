@@ -51,7 +51,6 @@ RUN pip install --no-cache-dir -r requirements_cuda.txt && pip install --no-cach
 
 WORKDIR /app/crynux-worker
 RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir .
-RUN pip uninstall -y triton
 
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04 as final
 
