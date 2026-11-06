@@ -17,7 +17,12 @@ def tx_option():
 def test_config():
     test_config = Config.model_validate(
         {
-            "log": {"dir": "logs", "level": "INFO"},
+            "log": {
+                "dir": "logs",
+                "level": "INFO",
+                "max_bytes": 52428800,
+                "backup_count": 5,
+            },
             "ethereum": {
                 "privkey": "",
                 "provider": "",

@@ -5,6 +5,12 @@ log:
   # Log level could be "DEBUG", "INFO", "WARNING", "ERROR"
   level: "INFO"
 
+  # Max size of one log file before rotation, in bytes
+  max_bytes: 52428800
+
+  # Number of rotated backup files to keep
+  backup_count: 5
+
 task_error_report:
   automatic: false
 

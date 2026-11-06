@@ -31,6 +31,8 @@ class CrynuxRunner(object):
         log.init(
             self.config.log.dir,
             self.config.log.level,
+            self.config.log.max_bytes,
+            self.config.log.backup_count,
             self.config.log.filename,
         )
         _logger.debug("Logger init completed.")

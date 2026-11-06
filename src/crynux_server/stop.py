@@ -31,7 +31,13 @@ async def _stop(
 ):
     config = get_config()
 
-    log.init(config.log.dir, config.log.level, config.log.filename)
+    log.init(
+        config.log.dir,
+        config.log.level,
+        config.log.max_bytes,
+        config.log.backup_count,
+        config.log.filename,
+    )
 
     await db.init(config.db)
 

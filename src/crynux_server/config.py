@@ -142,6 +142,8 @@ class LogConfig(BaseModel):
     m_dir: str = Field(alias="dir")
     level: LogLevel
     filename: str = "crynux-server.log"
+    max_bytes: int = Field(ge=1)
+    backup_count: int = Field(ge=1)
 
     @computed_field
     @property

@@ -66,8 +66,8 @@ def init_log(_logger, config):
         log_file,
         encoding="utf-8",
         delay=True,
-        maxBytes=50 * 1024 * 1024,
-        backupCount=5,
+        maxBytes=config.log.max_bytes,
+        backupCount=config.log.backup_count,
     )
     file_handler.setFormatter(
         logging.Formatter(

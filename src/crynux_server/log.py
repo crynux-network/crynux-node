@@ -3,7 +3,14 @@ import os
 from logging.handlers import RotatingFileHandler
 
 
-def init(log_dir: str, log_level: str, log_filename: str = "crynux-server.log", root: bool = False):
+def init(
+    log_dir: str,
+    log_level: str,
+    max_bytes: int,
+    backup_count: int,
+    log_filename: str = "crynux-server.log",
+    root: bool = False,
+):
     stream_handler = logging.StreamHandler()
 
     if not os.path.exists(log_dir):
@@ -13,8 +20,8 @@ def init(log_dir: str, log_level: str, log_filename: str = "crynux-server.log", 
         log_file,
         encoding="utf-8",
         delay=True,
-        maxBytes=50 * 1024 * 1024,
-        backupCount=5,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
     )
 
     dt_fmt = "%Y-%m-%d %H:%M:%S"

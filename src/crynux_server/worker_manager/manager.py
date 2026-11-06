@@ -180,6 +180,8 @@ class WorkerManager(object):
             "dir": self.config.log.dir,
             "level": self.config.log.level,
             "filename": log_filename,
+            "max_bytes": self.config.log.max_bytes,
+            "backup_count": self.config.log.backup_count,
         }
         envs["cw_log"] = json.dumps(log_config)
 
