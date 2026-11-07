@@ -1,0 +1,122 @@
+# Build and publish dual-mining Docker images (Crynux + Pearl) for selected networks.
+
+name: Release dual mining Docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image version tag (optional; without v prefix). Empty uses the short git sha."
+        required: false
+        type: string
+      task_error_report_automatic:
+        description: "Enable automatic Task error diagnostic reporting by default"
+        required: true
+        type: boolean
+        default: false
+      tp_fallback:
+        description: "Tensor parallel fallback when model dims are not divisible by GPU count"
+        required: true
+        type: choice
+        options:
+          - device_map
+          - reduce_gpus
+        default: device_map
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-the-docker-images:
+    strategy:
+      fail-fast: false
+      matrix:
+        blockchain:
+          - base
+          - rh
+    name: Build dual mining Docker image for ${{ matrix.blockchain }}
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 35840
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Set the config files
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x build/set-config-files.sh
+          ./build/set-config-files.sh ${{ matrix.blockchain }} ${{ inputs.task_error_report_automatic }} ${{ inputs.tp_fallback }}
+
+      - name: Configure Docker storage
+        shell: bash
+        run: |
+          set -eux
+          sudo systemctl stop docker
+          sudo rm -rf /var/lib/docker
+          sudo mkdir -p "${GITHUB_WORKSPACE}/.docker-data"
+          sudo tee /etc/docker/daemon.json >/dev/null <<EOF
+          {
+            "data-root": "${GITHUB_WORKSPACE}/.docker-data"
+          }
+          EOF
+          sudo systemctl start docker
+          docker info
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare Docker tags
+        id: vars
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          BLOCKCHAIN: ${{ matrix.blockchain }}
+        run: |
+          set -euo pipefail
+          SHA_SHORT="$(git rev-parse --short HEAD)"
+          IMAGE_NAME_LC="$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+
+          if [[ -n "${INPUT_TAG}" ]]; then
+            IMAGE_TAG="${INPUT_TAG#v}"
+          else
+            IMAGE_TAG="${SHA_SHORT}"
+          fi
+
+          TAG_PRIMARY="${REGISTRY}/${IMAGE_NAME_LC}:${IMAGE_TAG}-${BLOCKCHAIN}-pearl"
+
+          echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "${TAG_PRIMARY}" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${TAG_PRIMARY}"
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          push: true
+          file: build/docker/Dockerfile
+          tags: ${{ steps.vars.outputs.tags }}

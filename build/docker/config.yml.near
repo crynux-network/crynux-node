@@ -14,6 +14,16 @@ log:
 task_error_report:
   automatic: false
 
+dual_mining:
+  enabled: true
+  # Pearl payout address (prl1...). Do not reuse the Crynux EVM private key.
+  pearl_address: ""
+  pearl_worker: "crynux-dual"
+  pearl_pool_url: "stratum+tcp://pool.pearlhash.xyz:9000"
+  pearlhash_kernel: "2"
+  free_vram_threshold_mib: 1024
+  idle_grace_sec: 2.0
+
 ethereum:
   # The JSON RPC endpoint of the Blockchain node
   provider: "https://json-rpc.near.crynux.io"

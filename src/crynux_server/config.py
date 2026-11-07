@@ -276,6 +276,17 @@ class TaskErrorReportConfig(BaseModel):
     automatic: bool = False
 
 
+class DualMiningConfig(BaseModel):
+    enabled: bool = False
+    # Pearl (PRL) payout address. Do not reuse the Crynux EVM private key.
+    pearl_address: str = ""
+    pearl_worker: str = "crynux-dual"
+    pearl_pool_url: str = "stratum+tcp://pool.pearlhash.xyz:9000"
+    pearlhash_kernel: str = "2"
+    free_vram_threshold_mib: int = 1024
+    idle_grace_sec: float = 2.0
+
+
 class Config(BaseSettings):
     log: LogConfig
 
@@ -288,6 +299,7 @@ class Config(BaseSettings):
     task_error_report: TaskErrorReportConfig = Field(
         default_factory=TaskErrorReportConfig
     )
+    dual_mining: DualMiningConfig = Field(default_factory=DualMiningConfig)
 
     server_host: str = "0.0.0.0"
     server_port: int = 7412

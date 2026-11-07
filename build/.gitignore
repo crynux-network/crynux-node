@@ -4,6 +4,8 @@
 !windows/*
 !linux-server/*
 !docker/*
+!docker/dual_mining/
+!docker/dual_mining/**
 !lxc/**
 !bump-version.ps1
 !bump-version.sh

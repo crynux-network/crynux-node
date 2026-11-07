@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from crynux_server import models
 from crynux_server.config import Config, get_config
+from crynux_server.dual_mining import wait_inference_gate
 from crynux_server.in_memory_model_tracker import (
     InMemoryModelTracker,
     build_in_memory_model,
@@ -435,6 +436,10 @@ class TaskReconciler(object):
         task_dir = os.path.join(
             self.config.task_config.output_dir, HexBytes(task_id).hex()
         )
+        # When dual mining is enabled, wait until the controller stops Pearl
+        # and opens the gate before any GPU work for this task.
+        await wait_inference_gate()
+
         task.task_args = models.normalize_task_args_model_names(
             task.task_args, state.task_type
         )

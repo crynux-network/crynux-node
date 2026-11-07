@@ -84,7 +84,8 @@ FROM nvidia/cuda:13.0.3-cudnn-runtime-ubuntu22.04 as final
 
 # gcc/g++: Triton JIT-compiles CudaUtils (and kernels) at first use; runtime image has no compiler by default.
 # python3.10-dev: finegrained-fp8 (TaskArgs quant_method fp8) compiles cuda_utils.c and needs Python.h.
-RUN apt update && apt install python3.10 python3.10-venv python3.10-dev ffmpeg libsm6 libxext6 gcc g++ -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+# curl/tar/OpenCL: WildRig pearlhash for dual mining in the same container.
+RUN apt update && apt install python3.10 python3.10-venv python3.10-dev ffmpeg libsm6 libxext6 gcc g++ ca-certificates curl tar ocl-icd-libopencl1 libgomp1 -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 COPY build/data/ /app/
 COPY --from=builder1 /app/venv /app/venv
@@ -94,9 +95,19 @@ COPY crynux-worker/crynux_worker_process.py /app/worker/crynux_worker_process.py
 ENV PATH="/app/venv/bin:${PATH}"
 
 WORKDIR /app
+# Prepared by build/set-config-files.sh for the target blockchain (base/rh/...).
 COPY build/docker/config.yml.example config.yml.example
 COPY build/docker/start.sh start.sh
+COPY build/docker/dual_mining/install_wildrig.sh /tmp/install_wildrig.sh
+COPY build/docker/dual_mining/controller.py /opt/dual_mining/controller.py
+COPY build/docker/dual_mining/start-dual-mining.sh /opt/dual_mining/start-dual-mining.sh
+RUN sed -i 's/\r$//' /tmp/install_wildrig.sh /opt/dual_mining/start-dual-mining.sh \
+    && chmod 755 /tmp/install_wildrig.sh /opt/dual_mining/start-dual-mining.sh /opt/dual_mining/controller.py \
+    && bash /tmp/install_wildrig.sh \
+    && rm -f /tmp/install_wildrig.sh
 COPY --from=web-builder /app/dist/ dist/
 
-ENTRYPOINT ["bash", "start.sh"]
+# Dual-mining image: one container runs Crynux + controller + WildRig.
+# Platform configs only need this entrypoint path.
+ENTRYPOINT ["bash", "/opt/dual_mining/start-dual-mining.sh"]
 CMD [ "run" ]
