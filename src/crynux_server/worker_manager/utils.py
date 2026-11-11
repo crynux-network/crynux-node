@@ -11,7 +11,8 @@ def _osx_bundle_exe_head() -> List[str]:
     exe = os.path.abspath(
         os.path.join(
             os.path.dirname(os.path.dirname(sys.executable)),
-            "Resources",
+            "Frameworks",
+            "crynux_worker_process",
             "crynux_worker_process",
         )
     )

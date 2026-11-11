@@ -9,9 +9,7 @@ options = parser.parse_args()
 a = Analysis(
     ['crynux-node/src/app/main.py'],
     pathex=[],
-    binaries=[
-        ('dist/crynux_worker_process', '.'),
-    ],
+    binaries=[],
     datas=[
         ('data', 'data'),
         ('res', 'res'),

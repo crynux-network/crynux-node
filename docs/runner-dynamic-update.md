@@ -72,6 +72,9 @@ Examples:
 - Windows packaged patch path example:
   - `crynux_worker_process/_internal/crynux_worker/...`
   - `crynux_worker_process/_internal/gpt_task/...`
+- Mac packaged patch path example:
+  - `Crynux Node.app/Contents/Frameworks/crynux_worker_process/_internal/crynux_worker/...`
+  - `Crynux Node.app/Contents/Frameworks/crynux_worker_process/_internal/gpt_task/...`
 
 This shows that dynamic update can modify:
 

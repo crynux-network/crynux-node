@@ -42,7 +42,7 @@ include = ["crynux_server*", "crynux_worker*"]
 [project.optional-dependencies]
 test = ["pytest~=7.4.0", "Pillow", "web3[tester]"]
 app = [
-    "pyinstaller~=6.5.0",
+    "pyinstaller~=6.22.3",
     "PyQt6-WebEngine~=6.6.0",
     "qasync~=0.28.0",
 ]

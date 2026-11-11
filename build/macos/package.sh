@@ -39,6 +39,16 @@ else
   pyinstaller crynux.spec
 fi
 
+## Embed the onedir worker next to other binaries in the .app bundle
+cp -R "dist/crynux_worker_process" "dist/Crynux Node.app/Contents/Frameworks/crynux_worker_process"
+
+if [ "$IDENTITY" ]; then
+  codesign --deep --force --options runtime \
+    --entitlements entitlements.plist \
+    -s "$IDENTITY" \
+    "dist/Crynux Node.app" || exit 1
+fi
+
 cd dist
 
 [ -e Crynux.dmg ] && rm Crynux.dmg

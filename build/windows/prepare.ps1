@@ -87,7 +87,7 @@ Copy-Item $WORK_DIR/crynux-worker/crynux_worker_process.py worker/
 Set-Location $RELEASE_DIR/worker
 python -m venv venv
 ./venv/Scripts/Activate.ps1
-pip install pyinstaller==6.5.0
+pip install pyinstaller==6.22.3
 Check-ExitCode
 
 Copy-Item -Recurse $WORK_DIR/stable-diffusion-task $RELEASE_DIR/stable-diffusion-task

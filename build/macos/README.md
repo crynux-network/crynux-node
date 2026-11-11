@@ -19,7 +19,7 @@ automatically.
 
 |---------- Contents/MacOS/crynux -> signed by pyinstaller
 
-|---------- Contents/Resources/crynux_worker_process -> signed by pyinstaller
+|---------- Contents/Frameworks/crynux_worker_process/ -> onedir worker, signed after embed
 
 |---------- ...all the python .so/.lib executable files... -> signed by pyinstaller
 
@@ -52,7 +52,7 @@ If the notarization passes, the DMG file will be stapled.
 
 |---------- Contents/MacOS/crynux -> signed by pyinstaller
 
-|---------- Contents/Resources/crynux_worker_process -> signed by pyinstaller
+|---------- Contents/Frameworks/crynux_worker_process/ -> onedir worker, signed after embed
 
 |---------- ...all the other python .so/.lib executable files... -> signed by pyinstaller
 

@@ -13,8 +13,10 @@ scipy_hiddenimports = collect_submodules('scipy')
 scipy_datas = collect_data_files('scipy')
 rfc3987_syntax_datas = collect_data_files('rfc3987_syntax')
 kernels_datas = collect_data_files('kernels')
+onnxruntime_datas = collect_data_files('onnxruntime')
 xgrammar_binaries = collect_dynamic_libs('xgrammar')
-binaries = xgrammar_binaries
+onnxruntime_binaries = collect_dynamic_libs('onnxruntime')
+binaries = xgrammar_binaries + onnxruntime_binaries
 metadata_packages = [
     ('diffusers', True),
     ('transformers', True),
@@ -24,6 +26,7 @@ metadata_packages = [
     ('datasets', False),
     ('einops', False),
     ('fsspec', False),
+    ('gguf', False),
     ('huggingface-hub', False),
     ('imageio', False),
     ('jsonschema', False),
@@ -58,9 +61,10 @@ a = Analysis(
     ['worker/crynux_worker_process.py'],
     pathex=[],
     binaries=binaries,
-    datas=scipy_datas + rfc3987_syntax_datas + kernels_datas + metadata_datas,
+    datas=scipy_datas + rfc3987_syntax_datas + kernels_datas + onnxruntime_datas + metadata_datas,
     hiddenimports=[
         "diffusers.pipelines.stable_diffusion_xl.pipeline_output",
+        "gguf",
     ] + scipy_hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -84,15 +88,13 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='crynux_worker_process',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
+    upx=False,
     runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,
@@ -100,4 +102,14 @@ exe = EXE(
     target_arch=None,
     codesign_identity=options.identity,
     entitlements_file='entitlements.plist',
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='crynux_worker_process',
 )

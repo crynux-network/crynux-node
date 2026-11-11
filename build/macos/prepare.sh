@@ -119,7 +119,7 @@ cp $GIT_DIR/crynux-worker/crynux_worker_process.py worker/
 
 python3.10 -m venv worker/venv
 source "$WORK_DIR/worker/venv/bin/activate"
-pip install pyinstaller==6.5.0
+pip install pyinstaller==6.22.3
 
 echo "[Prepare] Preparing the stable-diffusion-task..."
 
