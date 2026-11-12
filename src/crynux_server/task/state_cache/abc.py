@@ -23,6 +23,11 @@ class InferenceTaskStateCache(ABC):
         status: Optional[List[models.InferenceTaskStatus]] = None,
     ) -> List[models.InferenceTaskState]: ...
 
+    @abstractmethod
+    async def get_latest_created(
+        self,
+    ) -> Optional[models.InferenceTaskState]: ...
+
 
 class DownloadTaskStateCache(ABC):
     @abstractmethod

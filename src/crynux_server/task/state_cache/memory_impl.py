@@ -11,6 +11,8 @@ class MemoryInferenceTaskStateCache(InferenceTaskStateCache):
     def __init__(self) -> None:
         self._states: Dict[bytes, InferenceTaskState] = {}
         self._state_times: Dict[bytes, datetime] = {}
+        # Creation order matching the DB autoincrement id sequence
+        self._created_ids: List[bytes] = []
 
     async def load(self, task_id_commitment: bytes) -> InferenceTaskState:
         if task_id_commitment in self._states:
@@ -21,8 +23,11 @@ class MemoryInferenceTaskStateCache(InferenceTaskStateCache):
             )
 
     async def dump(self, task_state: InferenceTaskState):
-        self._states[task_state.task_id_commitment] = task_state
-        self._state_times[task_state.task_id_commitment] = datetime.now()
+        task_id = task_state.task_id_commitment
+        if task_id not in self._states:
+            self._created_ids.append(task_id)
+        self._states[task_id] = task_state
+        self._state_times[task_id] = datetime.now()
 
     async def has(self, task_id_commitment: bytes) -> bool:
         return task_id_commitment in self._states
@@ -53,6 +58,11 @@ class MemoryInferenceTaskStateCache(InferenceTaskStateCache):
                 if state.status in status
             }
         return list(states.values())
+
+    async def get_latest_created(self) -> Optional[InferenceTaskState]:
+        if not self._created_ids:
+            return None
+        return self._states[self._created_ids[-1]]
 
 
 class MemoryDownloadTaskStateCache(DownloadTaskStateCache):

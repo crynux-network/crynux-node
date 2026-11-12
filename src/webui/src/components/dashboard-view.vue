@@ -236,6 +236,21 @@ const taskStatus = reactive({
     num_total: 0
 })
 
+// Map manager /tasks status to the three display rings.
+const taskDisplayStatus = computed(() => {
+    if (taskStatus.status === 'none') {
+        return 'idle'
+    }
+    if (
+        taskStatus.status === 'stopped' ||
+        taskStatus.status === 'unavailable' ||
+        taskStatus.status === 'waiting'
+    ) {
+        return 'stopped'
+    }
+    return 'running'
+})
+
 
 const settings = reactive({
     staking_amount: null,
@@ -1123,7 +1138,7 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
                             :size="70"
                             :percent="100"
                             :stroke-color="'cornflowerblue'"
-                            v-if="taskStatus.status === 'idle'"
+                            v-if="taskDisplayStatus === 'idle'"
                         >
                             <template #format>
                                 <span style="font-size: 14px; color: cornflowerblue">Idle</span>
@@ -1135,7 +1150,7 @@ const tempFilesFormatted = computed(() => formatBytes(systemInfo.disk.temp_files
                             :size="70"
                             :percent="100"
                             status="success"
-                            v-else-if="taskStatus.status === 'running'"
+                            v-else-if="taskDisplayStatus === 'running'"
                         >
                             <template #format>
                                 <span style="font-size: 14px">Running</span>

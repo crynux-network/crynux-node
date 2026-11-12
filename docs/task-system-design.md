@@ -90,19 +90,23 @@ flowchart LR
 
 The loop is the only component that issues protocol actions, and every relay-facing failure mode is handled by its cycle structure. Each cycle:
 
-1. Query the node's current task (`GET /v1/node/:address/task`). If the query fails, end the cycle and sleep one second.
-2. If the pointer no longer refers to a task the node is still tracking locally as open — because it moved to another task or was cleared — fetch that task's status once by id and close it locally. If the query returned no task, end the cycle; otherwise continue with the task the pointer refers to.
-3. Fetch the current task's status (`GET /v1/inference_tasks/:task_id_commitment`).
-4. Derive at most one action from the status and the local artifacts, per the condition-to-action rules in `docs/task-lifecycle.md`.
-5. Execute the action and await its completion, then end the cycle.
+1. Query the node's current task (`GET /v1/node/:address/task`). If the query fails, end the cycle and sleep one second. A failed pointer query MUST mark the manager task-stats view unsynced and MUST NOT advance the internal tracked task.
+2. On the first cycle in this process lifetime whose current-task pointer query succeeds, read the latest created local task record. If that record is still open, seed the internal tracked task from it. The node creates local inference records only from the Relay current-task pointer and processes them serially, so the local store has at most one open task and that open task is always the latest created record.
+3. If the internal tracked task is set and no longer equals the current pointer — because the pointer moved to another task or was cleared — fetch that tracked task's status once by id and close it locally. The cycle MUST update the internal tracked task to the current pointer only after that close succeeds. A failed close MUST leave the previous tracked id unchanged so the next cycle retries the same departed close. After a successful pointer read, the manager task-stats view MUST already expose the fresh current pointer even while a departed close is still pending.
+4. If the query returned no task, end the cycle; otherwise continue with the task the pointer refers to.
+5. Fetch the current task's status (`GET /v1/inference_tasks/:task_id_commitment`).
+6. Derive at most one action from the status and the local artifacts, per the condition-to-action rules in `docs/task-lifecycle.md`.
+7. Execute the action and await its completion, then end the cycle.
 
 Rules:
 
+- **Single current task.** The Relay keeps at most one current task per node. It clears the current-task pointer only when that task ends, in the same operation that writes the task's terminal status, and refuses to dispatch another task while the pointer is set. The node therefore observes task completion as a pointer change to empty or to the next task, and MUST close the previous local task through the departed-close path when the pointer no longer refers to it.
 - **Serial execution.** At most one action is in flight at any time; the loop awaits each action before starting the next cycle. The execute action first performs all required foreground downloads sequentially, then dispatches inference. Each foreground download wait is bounded by the Relay task deadline, and the inference wait is bounded by the extended execution deadline in section 4. Every other action is a single HTTP request.
 - **Failure handling.** Any relay request failure — transport error, 5xx, or 4xx — ends the cycle with a log entry. No local state advances on a failed request. A 4xx caused by a duplicated write (first response lost, action re-derived) converges on the next cycle, when the fresh status shows the operation already applied. The loop contains no per-operation retry, no sleeps inside actions, and no error-message pattern matching.
 - **Exception containment.** An unexpected exception inside a cycle is logged and MUST NOT terminate the loop or affect other cycles.
-- **Discovery and recovery.** Task discovery is the current-task poll itself. The first cycle after node startup is identical to every other cycle; there is no separate recovery flow. Local artifacts persisted before the restart determine which actions are skipped (see `docs/state-tracking.md`).
+- **Discovery and recovery.** Task discovery is the current-task poll itself. Recovery after restart uses the same cycle: the latest created local open task seeds the internal tracked task, then the cycle compares that id with the fresh Relay pointer and either resumes the current task or closes the departed task. Local artifacts persisted before the restart determine which actions are skipped for the current task (see `docs/state-tracking.md`).
 - **No node-issued aborts.** The loop MUST NOT call the relay abort endpoint. A task the node can no longer act on is closed locally and left to the relay's timeout processor.
+- **Manager task stats.** `GET /manager/v1/tasks` MUST NOT query the Relay. Its `status` field is one of the meta values `stopped`, `unavailable`, and `none`, or the `InferenceTaskStatus` member name of the current pointer's local record. When the node is not in a running-like node status, the endpoint MUST report `stopped`. When the node is running-like but the reconciler has not yet completed a successful pointer sync in this process, or the latest pointer read failed, the endpoint MUST report `unavailable`. When the synced pointer is empty, the endpoint MUST report `none`. When the synced pointer is set and no local record exists for that id, the endpoint MUST report `Started`. When the synced pointer is set and a local record exists, the endpoint MUST report that record's status name. A local task that is not the synced current pointer MUST NOT affect `status`.
 
 ## 4) Worker Process Health
 

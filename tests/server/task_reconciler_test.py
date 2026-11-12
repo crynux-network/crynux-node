@@ -773,3 +773,220 @@ async def test_restart_recovery_without_score_reexecutes():
 
     await cycle(reconciler)
     assert reconciler.execute_calls == 1
+
+
+async def test_startup_latest_open_closed_when_pointer_empty():
+    relay = FakeRelay()
+    relay.pointer = None
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.EndSuccess
+    cache = MemoryInferenceTaskStateCache()
+    await cache.dump(
+        models.InferenceTaskState(
+            task_id_commitment=TASK_ID_1,
+            timeout=0,
+            status=models.InferenceTaskStatus.Started,
+            task_type=models.TaskType.SD,
+        )
+    )
+    reconciler = make_reconciler(relay, cache=cache)
+
+    await cycle(reconciler)
+    state = await cache.load(TASK_ID_1)
+    assert state.status == models.InferenceTaskStatus.EndSuccess
+    assert reconciler._startup_tracked_loaded
+    assert reconciler._tracked_task_id is None
+    assert relay.calls["get_task"] == 1
+    assert reconciler.execute_calls == 0
+
+
+async def test_startup_latest_open_closed_when_pointer_points_elsewhere():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_2
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.EndAborted
+    relay.statuses[TASK_ID_2] = models.InferenceTaskStatus.Started
+    cache = MemoryInferenceTaskStateCache()
+    await cache.dump(
+        models.InferenceTaskState(
+            task_id_commitment=TASK_ID_1,
+            timeout=0,
+            status=models.InferenceTaskStatus.Started,
+            task_type=models.TaskType.SD,
+        )
+    )
+    reconciler = make_reconciler(relay, cache=cache)
+
+    await cycle(reconciler)
+    previous = await cache.load(TASK_ID_1)
+    assert previous.status == models.InferenceTaskStatus.EndAborted
+    assert reconciler.execute_calls == 1
+    assert relay.calls["get_task"] == 2
+    current = await cache.load(TASK_ID_2)
+    assert current.status == models.InferenceTaskStatus.Started
+    assert current.score == VALID_SCORE
+    assert reconciler._tracked_task_id == TASK_ID_2
+    assert reconciler.current_task_id == TASK_ID_2
+
+
+async def test_startup_seed_deferred_until_pointer_succeeds():
+    relay = FakeRelay()
+    relay.pointer = None
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.EndAborted
+    cache = MemoryInferenceTaskStateCache()
+    await cache.dump(
+        models.InferenceTaskState(
+            task_id_commitment=TASK_ID_1,
+            timeout=0,
+            status=models.InferenceTaskStatus.Started,
+            task_type=models.TaskType.SD,
+        )
+    )
+    reconciler = make_reconciler(relay, cache=cache)
+    relay.fail_next(
+        "node_get_current_task",
+        RelayError(500, "nodeGetCurrentTask", "temporary"),
+    )
+
+    await cycle(reconciler)
+    assert not reconciler._startup_tracked_loaded
+    assert not reconciler.current_task_synced
+    state = await cache.load(TASK_ID_1)
+    assert state.status == models.InferenceTaskStatus.Started
+
+    await cycle(reconciler)
+    assert reconciler._startup_tracked_loaded
+    assert reconciler.current_task_synced
+    assert reconciler.current_task_id is None
+    assert reconciler._tracked_task_id is None
+    assert relay.calls["get_task"] == 1
+    state = await cache.load(TASK_ID_1)
+    assert state.status == models.InferenceTaskStatus.EndAborted
+
+
+async def test_startup_same_pointer_resumes_current_task():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    cache = MemoryInferenceTaskStateCache()
+    await cache.dump(
+        models.InferenceTaskState(
+            task_id_commitment=TASK_ID_1,
+            timeout=0,
+            status=models.InferenceTaskStatus.Started,
+            task_type=models.TaskType.SD,
+        )
+    )
+    reconciler = make_reconciler(relay, cache=cache)
+
+    await cycle(reconciler)
+    assert reconciler._startup_tracked_loaded
+    assert reconciler.execute_calls == 1
+    assert relay.calls["get_task"] == 1
+    state = await cache.load(TASK_ID_1)
+    assert state.status == models.InferenceTaskStatus.Started
+    assert state.score == VALID_SCORE
+
+
+async def test_startup_closed_latest_does_not_seed_tracked():
+    relay = FakeRelay()
+    relay.pointer = None
+    cache = MemoryInferenceTaskStateCache()
+    await cache.dump(
+        models.InferenceTaskState(
+            task_id_commitment=TASK_ID_1,
+            timeout=0,
+            status=models.InferenceTaskStatus.EndSuccess,
+            task_type=models.TaskType.SD,
+        )
+    )
+    reconciler = make_reconciler(relay, cache=cache)
+
+    await cycle(reconciler)
+    assert reconciler._startup_tracked_loaded
+    assert reconciler._tracked_task_id is None
+    assert relay.calls["get_task"] == 0
+    state = await cache.load(TASK_ID_1)
+    assert state.status == models.InferenceTaskStatus.EndSuccess
+
+
+async def test_departed_close_failure_retries_before_current():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_2
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.EndSuccess
+    relay.statuses[TASK_ID_2] = models.InferenceTaskStatus.Started
+    cache = MemoryInferenceTaskStateCache()
+    await cache.dump(
+        models.InferenceTaskState(
+            task_id_commitment=TASK_ID_1,
+            timeout=0,
+            status=models.InferenceTaskStatus.Started,
+            task_type=models.TaskType.SD,
+        )
+    )
+    reconciler = make_reconciler(relay, cache=cache)
+    relay.fail_next(
+        "get_task",
+        RelayError(500, "getTask", "temporary"),
+    )
+
+    await cycle(reconciler)
+    assert reconciler.current_task_synced
+    assert reconciler.current_task_id == TASK_ID_2
+    assert reconciler._tracked_task_id == TASK_ID_1
+    assert reconciler.execute_calls == 0
+    state = await cache.load(TASK_ID_1)
+    assert state.status == models.InferenceTaskStatus.Started
+
+    await cycle(reconciler)
+    previous = await cache.load(TASK_ID_1)
+    assert previous.status == models.InferenceTaskStatus.EndSuccess
+    assert reconciler._tracked_task_id == TASK_ID_2
+    assert reconciler.execute_calls == 1
+    current = await cache.load(TASK_ID_2)
+    assert current.score == VALID_SCORE
+
+
+async def test_current_task_view_synced_empty_pointer():
+    relay = FakeRelay()
+    relay.pointer = None
+    reconciler = make_reconciler(relay)
+
+    assert not reconciler.current_task_synced
+    assert reconciler.current_task_id is None
+
+    await cycle(reconciler)
+    assert reconciler.current_task_synced
+    assert reconciler.current_task_id is None
+
+
+async def test_current_task_view_synced_non_empty_pointer():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    reconciler = make_reconciler(relay)
+
+    await cycle(reconciler)
+    assert reconciler.current_task_synced
+    assert reconciler.current_task_id == TASK_ID_1
+
+
+async def test_current_task_view_unsynced_after_pointer_failure():
+    relay = FakeRelay()
+    relay.pointer = TASK_ID_1
+    relay.statuses[TASK_ID_1] = models.InferenceTaskStatus.Started
+    reconciler = make_reconciler(relay)
+
+    await cycle(reconciler)
+    assert reconciler.current_task_synced
+    assert reconciler.current_task_id == TASK_ID_1
+
+    relay.fail_next(
+        "node_get_current_task",
+        RelayError(500, "nodeGetCurrentTask", "temporary"),
+    )
+    await cycle(reconciler)
+    assert not reconciler.current_task_synced
+    assert reconciler.current_task_id == TASK_ID_1
+
+    await cycle(reconciler)
+    assert reconciler.current_task_synced
+    assert reconciler.current_task_id == TASK_ID_1

@@ -21,6 +21,13 @@ def _load_model_files(data: str) -> List[ModelFileEntry]:
     return [ModelFileEntry.model_validate(entry) for entry in json.loads(data)]
 
 
+def _decode_task_id(task_id_commitment: str) -> bytes:
+    raw = task_id_commitment
+    if raw.startswith("0x") or raw.startswith("0X"):
+        raw = raw[2:]
+    return bytes.fromhex(raw)
+
+
 class DbInferenceTaskStateCache(InferenceTaskStateCache):
     async def load(self, task_id_commitment: bytes) -> InferenceTaskState:
         async with db.session_scope() as sess:
@@ -113,7 +120,7 @@ class DbInferenceTaskStateCache(InferenceTaskStateCache):
             states = (await sess.execute(q)).scalars().all()
             return [
                 InferenceTaskState(
-                    task_id_commitment=bytes.fromhex(state.task_id_commitment[2:]),
+                    task_id_commitment=_decode_task_id(state.task_id_commitment),
                     timeout=state.timeout,
                     status=state.status,
                     task_type=state.task_type,
@@ -127,6 +134,30 @@ class DbInferenceTaskStateCache(InferenceTaskStateCache):
                 )
                 for state in states
             ]
+
+    async def get_latest_created(self) -> Optional[InferenceTaskState]:
+        async with db.session_scope() as sess:
+            q = (
+                sa.select(db_models.InferenceTaskState)
+                .order_by(db_models.InferenceTaskState.id.desc())
+                .limit(1)
+            )
+            state = (await sess.scalars(q)).one_or_none()
+            if state is None:
+                return None
+            return InferenceTaskState(
+                task_id_commitment=_decode_task_id(state.task_id_commitment),
+                timeout=state.timeout,
+                status=state.status,
+                task_type=state.task_type,
+                files=state.files.split(","),
+                score=state.score,
+                waiting_tx_hash=state.waiting_tx_hash,
+                waiting_tx_method=state.waiting_tx_method,
+                checkpoint=state.checkpoint,
+                result_uploaded=state.result_uploaded,
+                execution_dtype=state.execution_dtype,
+            )
 
 
 class DbDownloadTaskStateCache(DownloadTaskStateCache):

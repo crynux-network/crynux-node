@@ -13,9 +13,10 @@ from .state_cache import (
     set_download_task_state_cache,
     set_inference_task_state_cache,
 )
-from .task_system import TaskSystem, get_task_system, set_task_system
+from .task_system import CurrentTaskView, TaskSystem, get_task_system, set_task_system
 
 __all__ = [
+    "CurrentTaskView",
     "TaskSystem",
     "get_task_system",
     "set_task_system",

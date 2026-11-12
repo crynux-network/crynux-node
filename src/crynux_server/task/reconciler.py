@@ -94,10 +94,28 @@ class TaskReconciler(object):
         self.interval = interval
         self.error_reporter = error_reporter
 
-        # The task the loop is currently tracking as open
+        # Last successfully synced Relay current-task pointer for /tasks.
+        # Updated immediately after a successful pointer read.
+        self._synced_task_id: Optional[bytes] = None
+        # True after a successful current-task pointer read in this process;
+        # False before the first success or after a pointer-read failure.
+        self._current_task_synced = False
+        # Internal tracked task used for departed-close retry. Updated only
+        # after a departed close succeeds, so a failed close can retry.
         self._tracked_task_id: Optional[bytes] = None
         # Process-local execution outcome per task, valid for one worker lifetime
         self._execution_outcomes: Dict[bytes, ExecutionOutcome] = {}
+        # Seed tracked from the latest local task once per process, after the
+        # first successful Relay current-task pointer read.
+        self._startup_tracked_loaded = False
+
+    @property
+    def current_task_id(self) -> Optional[bytes]:
+        return self._synced_task_id
+
+    @property
+    def current_task_synced(self) -> bool:
+        return self._current_task_synced
 
     async def run(self):
         _logger.info("Task reconciler started")
@@ -112,20 +130,31 @@ class TaskReconciler(object):
             await sleep(self.interval)
 
     async def _reconcile_once(self):
-        pointer = await self.relay.node_get_current_task()
+        try:
+            pointer = await self.relay.node_get_current_task()
+        except Exception:
+            self._current_task_synced = False
+            raise
+
         current: Optional[bytes] = (
             None if _is_task_id_empty(pointer) else bytes(pointer)
         )
 
-        tracked = self._tracked_task_id
-        if tracked is not None and tracked != current:
-            await self._close_departed_task(tracked)
-            self._tracked_task_id = None
+        self._synced_task_id = current
+        self._current_task_synced = True
+
+        if not self._startup_tracked_loaded:
+            await self._load_startup_tracked_task()
+            self._startup_tracked_loaded = True
+
+        previous = self._tracked_task_id
+        if previous is not None and previous != current:
+            await self._close_departed_task(previous)
+        self._tracked_task_id = current
 
         if current is None:
             return
 
-        self._tracked_task_id = current
         state = await self._load_state(current)
         if self._is_closed(state):
             return
@@ -144,6 +173,15 @@ class TaskReconciler(object):
 
         await self._sync_state(state, task)
         await self._apply_action(state, task)
+
+    async def _load_startup_tracked_task(self) -> None:
+        # Node creates tasks only from the Relay current-task pointer, so the
+        # local store has at most one non-terminal task and it is always the
+        # latest created record. Seed tracked from that record after restart.
+        latest = await self.cache.get_latest_created()
+        if latest is None or self._is_closed(latest):
+            return
+        self._tracked_task_id = bytes(latest.task_id_commitment)
 
     # The pointer no longer refers to this task: fetch its status once by id
     # and close it locally

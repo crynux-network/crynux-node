@@ -11,11 +11,12 @@ from crynux_server.task import (DbInferenceTaskStateCache,
                                 MemoryInferenceTaskStateCache)
 
 TASK_ID = bytes([1] * 32)
+TASK_ID_2 = bytes([2] * 32)
 
 
-def make_state() -> InferenceTaskState:
+def make_state(task_id: bytes = TASK_ID) -> InferenceTaskState:
     return InferenceTaskState(
-        task_id_commitment=TASK_ID,
+        task_id_commitment=task_id,
         timeout=900,
         status=InferenceTaskStatus.Started,
         task_type=TaskType.SD,
@@ -56,6 +57,7 @@ async def run_cache_roundtrip(cache):
 
     states = await cache.find(status=[InferenceTaskStatus.Validated])
     assert len(states) == 1
+    assert states[0].task_id_commitment == TASK_ID
     assert states[0].result_uploaded
     assert len(await cache.find(status=[InferenceTaskStatus.Started])) == 0
 
@@ -66,6 +68,36 @@ async def test_memory_state_cache():
 
 async def test_db_state_cache(init_db):
     await run_cache_roundtrip(DbInferenceTaskStateCache())
+
+
+async def run_latest_created(cache):
+    assert await cache.get_latest_created() is None
+
+    first = make_state(TASK_ID)
+    await cache.dump(first)
+    latest = await cache.get_latest_created()
+    assert latest is not None
+    assert latest.task_id_commitment == TASK_ID
+
+    second = make_state(TASK_ID_2)
+    await cache.dump(second)
+    latest = await cache.get_latest_created()
+    assert latest is not None
+    assert latest.task_id_commitment == TASK_ID_2
+
+    first.status = InferenceTaskStatus.EndSuccess
+    await cache.dump(first)
+    latest = await cache.get_latest_created()
+    assert latest is not None
+    assert latest.task_id_commitment == TASK_ID_2
+
+
+async def test_memory_get_latest_created():
+    await run_latest_created(MemoryInferenceTaskStateCache())
+
+
+async def test_db_get_latest_created(init_db):
+    await run_latest_created(DbInferenceTaskStateCache())
 
 
 async def test_db_init_adds_execution_dtype_to_existing_state_table(tmp_path):

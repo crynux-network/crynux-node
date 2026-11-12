@@ -1,19 +1,38 @@
 import time
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from crynux_server.models import NodeStatus, InferenceTaskStatus
+from crynux_server.models import InferenceTaskStatus, NodeStatus
+from crynux_server.task import get_task_system
 
 from ..depends import ManagerStateCacheDep, TaskStateCacheDep
 
 router = APIRouter(prefix="/tasks")
 
+TaskStatsStatus = Literal[
+    "stopped",
+    "unavailable",
+    "none",
+    "Queued",
+    "Started",
+    "ParametersUploaded",
+    "ErrorReported",
+    "ScoreReady",
+    "Validated",
+    "GroupValidated",
+    "EndInvalidated",
+    "EndSuccess",
+    "EndAborted",
+    "EndGroupRefund",
+    "EndGroupSuccess",
+]
+
 
 class TaskStats(BaseModel):
-    status: Literal["running", "idle", "stopped"]
+    status: TaskStatsStatus
     num_today: int
     num_total: int
 
@@ -30,24 +49,24 @@ async def get_task_stats(
         NodeStatus.PendingPause,
         NodeStatus.PendingStop,
     ]:
-        status = "stopped"
-    elif task_state_cache is None:
-        status = "idle"
+        status: TaskStatsStatus = "stopped"
     else:
-        running_status = [
-            InferenceTaskStatus.Queued,
-            InferenceTaskStatus.Started,
-            InferenceTaskStatus.ParametersUploaded,
-            InferenceTaskStatus.ErrorReported,
-            InferenceTaskStatus.ScoreReady,
-            InferenceTaskStatus.Validated,
-            InferenceTaskStatus.GroupValidated,
-        ]
-        running_states = await task_state_cache.find(status=running_status)
-        if len(running_states) > 0:
-            status = "running"
+        try:
+            view = get_task_system().get_current_task_view()
+        except AssertionError as e:
+            if "TaskSystem has not been set" not in str(e):
+                raise
+            view = None
+
+        if view is None or not view.synced:
+            status = "unavailable"
+        elif view.task_id is None:
+            status = "none"
+        elif task_state_cache is None or not await task_state_cache.has(view.task_id):
+            status = "Started"
         else:
-            status = "idle"
+            state = await task_state_cache.load(view.task_id)
+            status = cast(TaskStatsStatus, state.status.name)
 
     if task_state_cache is not None:
         now = datetime.now().astimezone()

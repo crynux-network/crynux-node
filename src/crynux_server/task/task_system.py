@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 from anyio import create_task_group, get_cancelled_exc_class
 from anyio.abc import TaskGroup
@@ -19,6 +19,11 @@ from .download_task import DownloadTaskRunner
 from .error_report import TaskErrorReporter, TaskErrorReportStore
 from .reconciler import TaskReconciler
 from .state_cache import DownloadTaskStateCache, InferenceTaskStateCache
+
+
+class CurrentTaskView(NamedTuple):
+    synced: bool
+    task_id: Optional[bytes]
 
 _logger = logging.getLogger(__name__)
 
@@ -187,6 +192,12 @@ class TaskSystem(object):
     def stop(self):
         if self._tg is not None and not self._tg.cancel_scope.cancel_called:
             self._tg.cancel_scope.cancel()
+
+    def get_current_task_view(self) -> CurrentTaskView:
+        return CurrentTaskView(
+            synced=self._reconciler.current_task_synced,
+            task_id=self._reconciler.current_task_id,
+        )
 
 
 _default_task_system: Optional[TaskSystem] = None
