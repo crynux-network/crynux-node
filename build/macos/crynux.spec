@@ -63,6 +63,6 @@ app = BUNDLE(
     icon='res/icon.icns',
     bundle_identifier='ai.crynux.node',
     info_plist={
-        'CFBundleShortVersionString': '3.7.1',
+        'CFBundleShortVersionString': '3.8.0',
     },
 )
