@@ -7,8 +7,11 @@
   2. Use target network `base` (`crynux-on-base-sepolia`).
   3. Copy `tests/e2e/config.yml.e2e_base` to `build/docker/config.yml.example`.
   4. Copy `src/webui/src/config.base.json` to `src/webui/src/config.json`.
-  5. Build the image from `build/docker/Dockerfile` with tag `crynux-node:e2e`.
-  6. Verify `crynux-node:e2e` exists locally.
+  5. Ensure `build/docker/Dockerfile` pins a published `ghcr.io/crynux-network/crynux-node-base:<commit>` in its worker `FROM` line.
+  6. Build with `docker build -t crynux-node:e2e -f build/docker/Dockerfile .`.
+  7. Verify `crynux-node:e2e` exists locally.
+
+- After rebuilding base via the manual GitHub Action, update that `FROM` tag to the new commit.
 
 - Contract addresses in `tests/e2e/config.yml.e2e_base` MUST match `crynux-contracts/deployments/primary/testnet/crynux-on-base-sepolia/contracts.json` `nodeContracts`.
 - Node `preloaded_models` in that config MUST be empty. Base models for e2e MUST come from Relay `DownloadModel` events (`required_models_by_vram` and demand-driven distribution).

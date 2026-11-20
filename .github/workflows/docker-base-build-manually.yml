@@ -1,0 +1,75 @@
+name: Build and publish crynux-node-base
+
+on:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  BASE_IMAGE_NAME: ${{ github.repository }}-base
+
+jobs:
+  build-and-push-base:
+    name: Build and push crynux-node-base
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 35840
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Configure Docker storage
+        shell: bash
+        run: |
+          set -eux
+          sudo systemctl stop docker
+          sudo rm -rf /var/lib/docker
+          sudo mkdir -p "${GITHUB_WORKSPACE}/.docker-data"
+          sudo tee /etc/docker/daemon.json >/dev/null <<EOF
+          {
+            "data-root": "${GITHUB_WORKSPACE}/.docker-data"
+          }
+          EOF
+          sudo systemctl start docker
+          docker info
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare image tag
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA_SHORT="$(git rev-parse --short HEAD)"
+          BASE_IMAGE="${REGISTRY}/${BASE_IMAGE_NAME}:${SHA_SHORT}"
+          echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "base_image=${BASE_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Base image: ${BASE_IMAGE}"
+
+      - name: Build and push base image
+        shell: bash
+        env:
+          BASE_IMAGE: ${{ steps.vars.outputs.base_image }}
+        run: |
+          set -euo pipefail
+          docker build -f build/docker/Dockerfile.base -t "${BASE_IMAGE}" .
+          docker push "${BASE_IMAGE}"
+          echo "Pushed ${BASE_IMAGE}"

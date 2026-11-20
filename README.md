@@ -247,9 +247,17 @@ Or if you are pulling the latest updates from a repo cloned earlier, use the fol
 
 3. Build the Docker image
 
+Heavy worker dependencies (torch / GPTQModel / Marlin) live in a separate
+`crynux-node-base:<commit>` image. The tag is pinned in the `FROM` line of
+`build/docker/Dockerfile`. From the repository root (Git Bash / WSL / Linux):
+
 ```shell
-# docker build -t crynux-node:dev -f .\build\Dockerfile .
+# docker build -t crynux-node:dev -f build/docker/Dockerfile .
 ```
+
+To rebuild the base image, run the GitHub Action
+`Build and publish crynux-node-base`, then update that `FROM` tag to the new
+`ghcr.io/crynux-network/crynux-node-base:<commit>`.
 
 4. Start the container
 

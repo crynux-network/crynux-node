@@ -1,0 +1,58 @@
+# Worker-side heavy dependencies and native builds for crynux-node.
+# Does not install sd_task / gpt_task / crynux_worker Python packages.
+
+FROM nvidia/cuda:13.0.3-cudnn-devel-ubuntu22.04 AS builder
+
+RUN apt update && apt install python3.10 python3.10-venv python3.10-dev python3-pip build-essential libssl-dev libffi-dev ffmpeg libsm6 libxext6 -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN python3 -m venv venv
+ENV PATH="/app/venv/bin:${PATH}"
+
+COPY stable-diffusion-task/requirements_cuda.txt /tmp/sd_requirements_cuda.txt
+COPY gpt-task/requirements_cuda.txt /tmp/gpt_requirements_cuda.txt
+COPY crynux-worker/requirements.txt /tmp/worker_requirements.txt
+
+RUN pip install --no-cache-dir -r /tmp/sd_requirements_cuda.txt
+
+# gptqmodel ships as sdist: needs venv torch (no build isolation) and an explicit
+# CUDA_ARCH_LIST because docker build has no nvidia-smi / GPU.
+# Install a pinned GPTQModel main commit with its declared dependencies (same
+# pattern as the previous gptqmodel==5.6.12 install). PyPI <=7.6.0 is
+# incompatible with transformers 5.x.
+# Arch list covers Ampere through current x86_64 Blackwell targets used by
+# A100/RTX30/RTX40/H100/B200/B300/RTX50. Jetson/ARM-only caps are omitted.
+ENV CUDA_ARCH_LIST="8.0;8.6;8.9;9.0;10.0;10.3;12.0" \
+    TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0;10.0;10.3;12.0" \
+    MAX_JOBS=2
+RUN pip install --no-cache-dir -U "setuptools<82" wheel && \
+    grep -v '^gptqmodel' /tmp/gpt_requirements_cuda.txt > /tmp/gpt_reqs.txt && \
+    pip install --no-cache-dir -r /tmp/gpt_reqs.txt && \
+    pip install --no-cache-dir --no-build-isolation \
+      "https://github.com/ModelCloud/GPTQModel/archive/70e3e6e1b3bd19244250053fbb17c81aa656abd2.zip"
+
+# Skip local packages; sd_task / gpt_task / crynux_worker are installed in the node image.
+RUN grep -vE '^(sd_task|gpt_task)$' /tmp/worker_requirements.txt > /tmp/worker_reqs.txt && \
+    pip install --no-cache-dir -r /tmp/worker_reqs.txt
+
+# Precompile Marlin FP16/BF16 into stable venv paths. The runtime image has no
+# nvcc; worker processes load these libraries through a site .pth import.
+COPY build/docker/precompile_gptqmodel_marlin.py /tmp/precompile_gptqmodel_marlin.py
+RUN python /tmp/precompile_gptqmodel_marlin.py && \
+    rm -f /tmp/precompile_gptqmodel_marlin.py
+
+COPY build/docker/crynux_gptqmodel_marlin_preload.py /tmp/crynux_gptqmodel_marlin_preload.py
+COPY build/docker/crynux_gptqmodel_marlin.pth /tmp/crynux_gptqmodel_marlin.pth
+RUN SITE_PACKAGES="$(python -c 'import site; print(site.getsitepackages()[0])')" && \
+    cp /tmp/crynux_gptqmodel_marlin_preload.py "${SITE_PACKAGES}/crynux_gptqmodel_marlin_preload.py" && \
+    cp /tmp/crynux_gptqmodel_marlin.pth "${SITE_PACKAGES}/crynux_gptqmodel_marlin.pth" && \
+    rm -f /tmp/crynux_gptqmodel_marlin_preload.py /tmp/crynux_gptqmodel_marlin.pth /tmp/sd_requirements_cuda.txt /tmp/gpt_requirements_cuda.txt /tmp/gpt_reqs.txt /tmp/worker_requirements.txt /tmp/worker_reqs.txt
+
+FROM nvidia/cuda:13.0.3-cudnn-runtime-ubuntu22.04
+
+# python3.10: venv interpreters resolve to the system Python.
+RUN apt update && apt install python3.10 python3.10-venv -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/venv /app/venv
+ENV PATH="/app/venv/bin:${PATH}"
