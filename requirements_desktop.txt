@@ -26,3 +26,4 @@ eth-rlp==1.0.1
 Pillow==10.0.1
 limiter==0.1.2
 eth-keyfile==0.8.1
+av==17.1.0

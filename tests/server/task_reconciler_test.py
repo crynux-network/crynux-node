@@ -990,3 +990,173 @@ async def test_current_task_view_unsynced_after_pointer_failure():
     await cycle(reconciler)
     assert reconciler.current_task_synced
     assert reconciler.current_task_id == TASK_ID_1
+
+
+def _write_test_h264_mp4(
+    mp4_path,
+    *,
+    num_frames: int = 17,
+    width: int = 96,
+    height: int = 64,
+    with_audio: bool = False,
+) -> None:
+    import fractions
+    import math
+    import struct
+    import av
+    from PIL import Image
+
+    with av.open(str(mp4_path), mode="w", format="mp4") as container:
+        v_stream = container.add_stream("libx264", rate=fractions.Fraction(24, 1))
+        v_stream.width = width
+        v_stream.height = height
+        v_stream.pix_fmt = "yuv420p"
+        v_stream.options = {"crf": "18", "preset": "medium", "threads": "1"}
+
+        a_stream = None
+        if with_audio:
+            a_stream = container.add_stream("aac", rate=24000)
+            a_stream.layout = "stereo"
+            a_stream.bit_rate = 192000
+
+        for idx in range(num_frames):
+            img = Image.frombytes(
+                "RGB",
+                (width, height),
+                bytes(
+                    val
+                    for y in range(height)
+                    for x in range(width)
+                    for val in (
+                        (x * 2 + idx * 9) % 256,
+                        (y * 3 + idx * 5) % 256,
+                        ((x + y) + idx * 11) % 256,
+                    )
+                ),
+            )
+            vf = av.VideoFrame.from_image(img).reformat(format="yuv420p")
+            for packet in v_stream.encode(vf):
+                container.mux(packet)
+        for packet in v_stream.encode(None):
+            container.mux(packet)
+
+        if a_stream is not None:
+            samples = 24000
+            af = av.AudioFrame(format="fltp", layout="stereo", samples=samples)
+            af.sample_rate = 24000
+            af.pts = 0
+            left = bytes().join(
+                struct.pack("<f", 0.5 * math.sin(2.0 * math.pi * 440.0 * (i / 24000.0)))
+                for i in range(samples)
+            )
+            right = bytes().join(
+                struct.pack("<f", 0.4 * math.cos(2.0 * math.pi * 880.0 * (i / 24000.0)))
+                for i in range(samples)
+            )
+            af.planes[0].update(left)
+            af.planes[1].update(right)
+            for packet in a_stream.encode(af):
+                container.mux(packet)
+            for packet in a_stream.encode(None):
+                container.mux(packet)
+
+
+def test_imhash_video_golden_vectors_match_relay():
+    import math
+    import struct
+    import imhash
+    from crynux_server.task import utils as task_utils
+
+    assert task_utils.sampled_video_frame_indices(1) == [0]
+    assert task_utils.sampled_video_frame_indices(5) == [0, 1, 2, 3, 4]
+    assert task_utils.sampled_video_frame_indices(81) == [0, 11, 22, 34, 45, 57, 68, 80]
+    assert task_utils.sampled_video_frame_indices(121) == [
+        0,
+        17,
+        34,
+        51,
+        68,
+        85,
+        102,
+        120,
+    ]
+
+    height, width = 48, 64
+    luma = bytes((x * 3 + y * 5) % 256 for y in range(height) for x in range(width))
+    luma_hash = imhash.getVideoFramePHash(luma, width, height)
+    assert luma_hash.hex() == "c097384b5a770de9"
+
+    sample_count = 24000
+    stereo_pcm = bytearray()
+    for i in range(sample_count):
+        tm = i / float(sample_count)
+        val = 0.6 * math.sin(2.0 * math.pi * (220.0 * tm + 400.0 * tm * tm))
+        stereo_pcm.extend(struct.pack("<dd", val + 0.125, val - 0.125))
+    audio_hash = imhash.getVideoAudioPHash(bytes(stereo_pcm), 2)
+    assert audio_hash.hex() == "703f073a97dd8087"
+
+
+@pytest.mark.anyio
+async def test_run_inference_task_video_hashes_mp4_locally(
+    tmp_path, monkeypatch
+):
+    from crynux_server.task import utils as task_utils
+
+    silent_dir = tmp_path / "silent"
+    silent_dir.mkdir()
+    silent_mp4 = silent_dir / "0.mp4"
+    _write_test_h264_mp4(silent_mp4, with_audio=False)
+
+    av_dir = tmp_path / "av"
+    av_dir.mkdir()
+    av_mp4 = av_dir / "0.mp4"
+    _write_test_h264_mp4(av_mp4, with_audio=True)
+
+    class DummyTaskResult:
+        def done(self):
+            return True
+
+        async def get(self):
+            return models.SuccessResult(
+                status="success",
+                execution_dtype="bfloat16",
+                model_cache_hash="a" * 64,
+            )
+
+    class DummyWorkerManager:
+        async def send_task(self, task_input, deadline=None):
+            assert task_input.task.task_type == models.TaskType.VIDEO
+            return DummyTaskResult()
+
+    monkeypatch.setattr(
+        task_utils, "get_worker_manager", lambda role: DummyWorkerManager()
+    )
+
+    files, hashes, checkpoint, dtype, cache_hash = await task_utils.run_inference_task(
+        task_id_commitment=TASK_ID_1,
+        task_type=models.TaskType.VIDEO,
+        models=[],
+        task_args="{}",
+        task_dir=str(silent_dir),
+    )
+
+    assert files == [str(silent_mp4)]
+    assert len(hashes) == 1
+    assert len(hashes[0]) == 64
+    assert task_utils.validate_score(b"".join(hashes))
+    assert checkpoint is None
+    assert dtype == "bfloat16"
+    assert cache_hash == "a" * 64
+
+    av_files, av_hashes, _, _, _ = await task_utils.run_inference_task(
+        task_id_commitment=TASK_ID_1,
+        task_type=models.TaskType.VIDEO,
+        models=[],
+        task_args="{}",
+        task_dir=str(av_dir),
+    )
+    assert av_files == [str(av_mp4)]
+    assert len(av_hashes) == 1
+    assert len(av_hashes[0]) == 72
+    assert av_hashes[0][:64] == hashes[0]
+    assert task_utils.validate_score(b"".join(av_hashes))

@@ -100,3 +100,53 @@ def test_normalize_task_args_model_names_sd_ft_lora():
         normalize_task_args_model_names(task_args, TaskType.SD_FT_LORA)
     )
     assert normalized["model"]["name"] == "crynux-network/stable-diffusion-v1-5"
+
+
+def test_normalize_task_args_model_names_video_and_lora_model_id():
+    task_args = json.dumps(
+        {
+            "version": "3.8.0",
+            "base_model": {"name": "Wan-AI/Wan2.2-I2V-A14B-Diffusers"},
+            "prompt": "Rain on window",
+            "components": {
+                "text_encoder": {
+                    "format": "diffusers",
+                    "repo": "Org/Custom-UMT5",
+                    "format_kwargs": {"subfolder": "text_encoder"},
+                }
+            },
+            "loras": [
+                {
+                    "model": "LightX2V/Wan2.2-Lightning",
+                    "weight_file_name": "Wan2.2_High.safetensors",
+                    "weight": 100,
+                },
+                {
+                    "model": "https://example.com/Models/MotionLora.safetensors",
+                    "weight": 80,
+                },
+            ],
+        }
+    )
+    normalized = json.loads(
+        normalize_task_args_model_names(task_args, TaskType.VIDEO)
+    )
+    assert normalized["base_model"]["name"] == "wan-ai/wan2.2-i2v-a14b-diffusers"
+    assert normalized["components"]["text_encoder"]["repo"] == "org/custom-umt5"
+    assert normalized["loras"][0]["model"] == "lightx2v/wan2.2-lightning"
+    assert normalized["loras"][0]["weight_file_name"] == "Wan2.2_High.safetensors"
+    assert (
+        normalized["loras"][1]["model"]
+        == "https://example.com/Models/MotionLora.safetensors"
+    )
+
+    lora_cfg = ModelConfig.from_model_id(
+        "lora:LightX2V/Wan2.2-Lightning@deadbeef#Wan2.2_High.safetensors"
+    )
+    assert lora_cfg.id == "lightx2v/wan2.2-lightning"
+    assert lora_cfg.revision == "deadbeef"
+    assert lora_cfg.weight_file_name == "Wan2.2_High.safetensors"
+    assert (
+        lora_cfg.to_model_id()
+        == "lora:lightx2v/wan2.2-lightning@deadbeef#Wan2.2_High.safetensors"
+    )

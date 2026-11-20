@@ -26,6 +26,28 @@ def _normalize_string_model_name(args: dict, key: str):
         args[key] = normalize_model_name(name)
 
 
+def _normalize_components_repos(args: dict):
+    components = args.get("components")
+    if not isinstance(components, dict):
+        return
+    for source in components.values():
+        if isinstance(source, dict):
+            repo = source.get("repo")
+            if isinstance(repo, str):
+                source["repo"] = normalize_model_name(repo)
+
+
+def _normalize_video_loras(args: dict):
+    loras = args.get("loras")
+    if not isinstance(loras, list):
+        return
+    for item in loras:
+        if isinstance(item, dict):
+            model = item.get("model")
+            if isinstance(model, str):
+                item["model"] = normalize_model_name(model)
+
+
 def normalize_task_args_model_names(task_args: str, task_type: TaskType) -> str:
     """Rewrite the model name fields inside the task args json string with
     normalize_model_name, so that the model names used to load models during
@@ -46,11 +68,16 @@ def normalize_task_args_model_names(task_args: str, task_type: TaskType) -> str:
         _normalize_string_model_name(args, "unet")
         _normalize_string_model_name(args, "vae")
         _normalize_string_model_name(args, "textual_inversion")
+        _normalize_components_repos(args)
     elif task_type == TaskType.LLM:
         model = args.get("model")
         if isinstance(model, str):
             args["model"] = normalize_model_name(model)
     elif task_type == TaskType.SD_FT_LORA:
         _normalize_object_model_name(args, "model", "name")
+    elif task_type == TaskType.VIDEO:
+        _normalize_object_model_name(args, "base_model", "name")
+        _normalize_components_repos(args)
+        _normalize_video_loras(args)
 
     return json.dumps(args)

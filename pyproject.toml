@@ -29,8 +29,9 @@ dependencies = [
     "eth-rlp==1.0.1",
     "limiter==0.1.2",
     "Pillow",
+    "av==17.1.0",
 ]
-version = "3.7.1"
+version = "3.8.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]

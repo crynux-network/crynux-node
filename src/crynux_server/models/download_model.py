@@ -19,6 +19,8 @@ class ModelConfig(BaseModel):
     id: str
     type: Literal["base", "lora", "controlnet"]
     variant: str | None = None
+    revision: str | None = None
+    weight_file_name: str = ""
 
     @field_validator("id")
     @classmethod
@@ -26,21 +28,43 @@ class ModelConfig(BaseModel):
         return normalize_model_name(v)
 
     def to_model_id(self) -> str:
+        if self.id.startswith(("http://", "https://")):
+            return f"{self.type}:{self.id}"
         model_body = self.id
         if self.variant:
             model_body += f"+{self.variant}"
+        if self.revision:
+            model_body += f"@{self.revision}"
+        if self.weight_file_name:
+            model_body += f"#{self.weight_file_name}"
         return f"{self.type}:{model_body}"
 
     @classmethod
     def from_model_id(cls, model_id: str) -> "ModelConfig":
         model_type, model_body = model_id.split(":", maxsplit=1)
+        if model_body.startswith(("http://", "https://")):
+            return cls.model_validate({"id": model_body, "type": model_type})
+
+        weight_file_name = ""
+        if "#" in model_body:
+            model_body, weight_file_name = model_body.split("#", maxsplit=1)
+        revision: str | None = None
+        if "@" in model_body:
+            model_body, revision = model_body.split("@", maxsplit=1)
+            revision = revision or None
         if "+" in model_body:
             model_name, variant = model_body.split("+", maxsplit=1)
         else:
             model_name = model_body
             variant = None
         return cls.model_validate(
-            {"id": model_name, "type": model_type, "variant": variant}
+            {
+                "id": model_name,
+                "type": model_type,
+                "variant": variant,
+                "revision": revision,
+                "weight_file_name": weight_file_name,
+            }
         )
 
     @classmethod

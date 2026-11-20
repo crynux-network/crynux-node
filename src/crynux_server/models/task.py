@@ -15,6 +15,7 @@ class TaskType(IntEnum):
     SD = 0
     LLM = 1
     SD_FT_LORA = 2
+    VIDEO = 3
 
 
 class TaskError(IntEnum):
