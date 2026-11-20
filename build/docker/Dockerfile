@@ -34,7 +34,7 @@ RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir
 
 # Pinned crynux-node-base with worker heavy deps + Marlin.
 # After rebuilding base, replace the tag with the new short commit from GHCR.
-FROM ghcr.io/crynux-network/crynux-node-base:REPLACE_AFTER_BASE_BUILD AS worker-venv
+FROM ghcr.io/crynux-network/crynux-node-base:e5fb074 AS worker-venv
 
 ENV PATH="/app/venv/bin:${PATH}"
 
