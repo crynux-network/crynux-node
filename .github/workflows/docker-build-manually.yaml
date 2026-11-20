@@ -8,9 +8,13 @@ on:
         required: true
         default: 'triggered by developer'
       blockchain:
-        description: 'Blockchain'
+        description: 'Blockchain (Robinhood uses rh)'
         required: true
-        default: 'base'
+        type: choice
+        options:
+          - base
+          - rh
+        default: base
       tag:
         description: 'Release version to build from v-prefixed git tag (if not specified, use selected ref and git hash)'
         required: false
