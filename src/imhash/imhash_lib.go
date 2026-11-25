@@ -1,6 +1,6 @@
 package main
 
-// #define Py_SSIZE_T_CLEAN
+// #define PY_SSIZE_T_CLEAN
 // #include <stdlib.h>
 // #include <Python.h>
 // int PyArg_ParseTuple_U(PyObject*, PyObject**);
