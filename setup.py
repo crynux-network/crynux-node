@@ -9,7 +9,7 @@ setup(
             "imhash",
             ["src/imhash/imhash_lib.go"],
             py_limited_api=True,
-            define_macros=[("Py_LIMITED_API", None)],
+            define_macros=[("Py_LIMITED_API", "0x030A0000")],
         ),
     ],
     build_golang={"root": "imhash"},
